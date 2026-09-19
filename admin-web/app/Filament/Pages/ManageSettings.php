@@ -40,6 +40,14 @@ class ManageSettings extends Page implements HasForms
             'enable_wallet_payments' => true,
             'min_wallet_topup' => 500,
             'min_driver_withdrawal' => 1000,
+            'mail_mailer' => env('MAIL_MAILER', 'smtp'),
+            'smtp_host' => env('MAIL_HOST', '127.0.0.1'),
+            'smtp_port' => env('MAIL_PORT', 2525),
+            'smtp_username' => env('MAIL_USERNAME', ''),
+            'smtp_password' => env('MAIL_PASSWORD', ''),
+            'smtp_encryption' => env('MAIL_ENCRYPTION', 'tls'),
+            'smtp_from_address' => env('MAIL_FROM_ADDRESS', 'no-reply@goride.app'),
+            'smtp_from_name' => env('MAIL_FROM_NAME', 'GoRide'),
         ];
 
         $this->form->fill(array_merge($defaults, $settings));
@@ -170,19 +178,68 @@ class ManageSettings extends Page implements HasForms
                                             ->default(1000),
                                     ]),
                             ]),
-                        \Filament\Schemas\Components\Tabs\Tab::make('Email Templates')
+                        \Filament\Schemas\Components\Tabs\Tab::make('Email & SMTP Settings')
                             ->icon('heroicon-o-envelope')
                             ->schema([
-                                Forms\Components\Textarea::make('email_template_welcome')
-                                    ->label('Welcome Email'),
-                                Forms\Components\Textarea::make('email_template_password_reset')
-                                    ->label('Password Reset Email'),
-                                Forms\Components\Textarea::make('email_template_deposit')
-                                    ->label('Deposit Success Email'),
-                                Forms\Components\Textarea::make('email_template_withdraw')
-                                    ->label('Withdrawal Processed Email'),
-                                Forms\Components\Textarea::make('email_template_support')
-                                    ->label('Support Ticket Received Email'),
+                                \Filament\Schemas\Components\Section::make('SMTP Transport Configuration')
+                                    ->description('Configure your transactional email server (Mailtrap, SendGrid, Postmark, AWS SES, or private SMTP).')
+                                    ->icon('heroicon-o-server-stack')
+                                    ->columns(2)
+                                    ->schema([
+                                        Forms\Components\Select::make('mail_mailer')
+                                            ->label('Mail Driver')
+                                            ->options([
+                                                'smtp' => 'SMTP (Standard Network Mailer)',
+                                                'log' => 'Log Driver (Local Testing - logs to laravel.log)',
+                                            ])
+                                            ->default('smtp')
+                                            ->required(),
+                                        Forms\Components\Select::make('smtp_encryption')
+                                            ->label('Encryption Protocol')
+                                            ->options([
+                                                'tls' => 'TLS (Recommended - Port 587)',
+                                                'ssl' => 'SSL (Port 465)',
+                                                'none' => 'None / Plain (Port 25 or 2525)',
+                                            ])
+                                            ->default('tls'),
+                                        Forms\Components\TextInput::make('smtp_host')
+                                            ->label('SMTP Host Server')
+                                            ->placeholder('smtp.mailtrap.io or smtp.sendgrid.net')
+                                            ->required()
+                                            ->columnSpan(1),
+                                        Forms\Components\TextInput::make('smtp_port')
+                                            ->label('SMTP Port')
+                                            ->numeric()
+                                            ->placeholder('587, 465, or 2525')
+                                            ->required()
+                                            ->columnSpan(1),
+                                        Forms\Components\TextInput::make('smtp_username')
+                                            ->label('SMTP Username / API Key')
+                                            ->placeholder('smtp_username_here')
+                                            ->columnSpan(1),
+                                        Forms\Components\TextInput::make('smtp_password')
+                                            ->label('SMTP Password / Secret')
+                                            ->password()
+                                            ->revealable()
+                                            ->placeholder('••••••••••••')
+                                            ->columnSpan(1),
+                                    ]),
+
+                                \Filament\Schemas\Components\Section::make('Sender Identity')
+                                    ->description('Default address and display name attached to all outgoing transactional emails.')
+                                    ->icon('heroicon-o-user-circle')
+                                    ->columns(2)
+                                    ->schema([
+                                        Forms\Components\TextInput::make('smtp_from_address')
+                                            ->label('From Email Address')
+                                            ->email()
+                                            ->placeholder('no-reply@goride.app')
+                                            ->required(),
+                                        Forms\Components\TextInput::make('smtp_from_name')
+                                            ->label('From Display Name')
+                                            ->placeholder('GoRide Notifications')
+                                            ->required(),
+                                    ]),
                             ]),
                         \Filament\Schemas\Components\Tabs\Tab::make('Features')
                             ->icon('heroicon-o-sparkles')
@@ -217,6 +274,43 @@ class ManageSettings extends Page implements HasForms
             ->title('Settings updated successfully')
             ->success()
             ->send();
+    }
+
+    protected function getHeaderActions(): array
+    {
+        return [
+            Action::make('testSmtp')
+                ->label('Test SMTP Connection')
+                ->icon('heroicon-o-paper-airplane')
+                ->color('info')
+                ->modalHeading('Send Live SMTP Test Email')
+                ->modalDescription('Verify your SMTP credentials and delivery by sending an immediate diagnostic message.')
+                ->form([
+                    Forms\Components\TextInput::make('test_email')
+                        ->label('Recipient Email Address')
+                        ->email()
+                        ->required()
+                        ->default(auth()->user()?->email ?? 'admin@goride.app')
+                        ->helperText('A real diagnostic message will be dispatched to this address to verify connectivity.'),
+                ])
+                ->action(function (array $data) {
+                    $res = \App\Services\NotificationService::testSmtpConnection($data['test_email']);
+                    if ($res['success']) {
+                        Notification::make()
+                            ->title('SMTP Test Succeeded!')
+                            ->body("A diagnostic test message was successfully dispatched to {$data['test_email']}.")
+                            ->success()
+                            ->send();
+                    } else {
+                        Notification::make()
+                            ->title('SMTP Test Failed')
+                            ->body($res['message'])
+                            ->danger()
+                            ->persistent()
+                            ->send();
+                    }
+                }),
+        ];
     }
 
     protected function getFormActions(): array

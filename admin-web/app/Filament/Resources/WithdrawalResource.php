@@ -171,11 +171,18 @@ class WithdrawalResource extends Resource
 
     public static function getNavigationBadge(): ?string
     {
-        return (string) WithdrawalRequest::where('status', 'pending')->count();
+        try {
+            $count = \Illuminate\Support\Facades\Cache::remember('nav_badge_withdrawal', 30, function () {
+                return WithdrawalRequest::where('status', 'pending')->count();
+            });
+            return $count > 0 ? (string) $count : null;
+        } catch (\Throwable $e) {
+            return null;
+        }
     }
 
     public static function getNavigationBadgeColor(): ?string
     {
-        return WithdrawalRequest::where('status', 'pending')->count() > 0 ? 'danger' : 'success';
+        return 'danger';
     }
 }

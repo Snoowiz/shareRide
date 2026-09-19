@@ -122,6 +122,21 @@ class TicketReplyWidget extends Widget implements HasForms
                 'body' => 'You have a new reply on your support ticket.',
                 'data' => json_encode(['screen' => 'support_chat', 'ticket_id' => $this->record->id]),
             ]);
+
+            // Dispatch transactional email to user
+            $userProfile = $this->record->user;
+            if ($userProfile && !empty($userProfile->email)) {
+                \App\Services\NotificationService::sendComplaintReply(
+                    email: $userProfile->email,
+                    name: $userProfile->full_name ?: 'Valued User',
+                    ticketData: [
+                        'id' => $this->record->id,
+                        'subject' => $this->record->subject,
+                    ],
+                    replyMessage: $state['message'],
+                    status: $this->record->status ?? 'In Progress'
+                );
+            }
         }
 
         Notification::make()->title('Reply sent successfully!')->success()->send();

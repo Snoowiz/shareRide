@@ -238,17 +238,20 @@ class DriverResource extends Resource
 
     public static function getNavigationBadge(): ?string
     {
-        return (string) static::getEloquentQuery()
-            ->whereHas('driverProfile', fn($q) => $q->where('verification_status', 'pending'))
-            ->count();
+        try {
+            $count = \Illuminate\Support\Facades\Cache::remember('nav_badge_driver', 30, function () {
+                return static::getEloquentQuery()
+                    ->whereHas('driverProfile', fn($q) => $q->where('verification_status', 'pending'))
+                    ->count();
+            });
+            return $count > 0 ? (string) $count : null;
+        } catch (\Throwable $e) {
+            return null;
+        }
     }
 
     public static function getNavigationBadgeColor(): ?string
     {
-        $count = static::getEloquentQuery()
-            ->whereHas('driverProfile', fn($q) => $q->where('verification_status', 'pending'))
-            ->count();
-
-        return $count > 0 ? 'warning' : 'success';
+        return 'warning';
     }
 }

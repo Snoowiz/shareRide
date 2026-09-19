@@ -231,6 +231,13 @@ class RiderResource extends Resource
 
     public static function getNavigationBadge(): ?string
     {
-        return (string) static::getEloquentQuery()->count();
+        try {
+            $count = \Illuminate\Support\Facades\Cache::remember('nav_badge_rider', 30, function () {
+                return static::getEloquentQuery()->count();
+            });
+            return (string) $count;
+        } catch (\Throwable $e) {
+            return null;
+        }
     }
 }

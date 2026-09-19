@@ -94,11 +94,18 @@ class SupportTicketResource extends Resource
 
     public static function getNavigationBadge(): ?string
     {
-        return (string) SupportTicket::where('status', 'open')->count();
+        try {
+            $count = \Illuminate\Support\Facades\Cache::remember('nav_badge_support', 30, function () {
+                return SupportTicket::where('status', 'open')->count();
+            });
+            return $count > 0 ? (string) $count : null;
+        } catch (\Throwable $e) {
+            return null;
+        }
     }
 
     public static function getNavigationBadgeColor(): ?string
     {
-        return SupportTicket::where('status', 'open')->count() > 0 ? 'danger' : 'success';
+        return 'danger';
     }
 }

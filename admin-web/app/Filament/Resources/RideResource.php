@@ -145,6 +145,22 @@ class RideResource extends Resource
                                 'data' => json_encode(['screen' => 'home']),
                                 'is_read' => false,
                             ]);
+
+                            if ($record->rider && !empty($record->rider->email)) {
+                                \App\Services\NotificationService::sendRideUpdate(
+                                    email: $record->rider->email,
+                                    name: $record->rider->full_name ?: 'Valued Rider',
+                                    rideData: [
+                                        'id' => $record->id,
+                                        'status' => 'CANCELLED',
+                                        'driver_name' => $record->driver?->full_name ?? 'N/A',
+                                        'pickup_location' => $record->pickup_address ?? 'Pickup point',
+                                        'destination_location' => $record->destination_address ?? 'Drop-off point',
+                                        'fare' => $record->fare ?? 0,
+                                        'payment_method' => $record->payment_method ?? 'N/A',
+                                    ]
+                                );
+                            }
                         }
 
                         // Notify driver
@@ -200,11 +216,18 @@ class RideResource extends Resource
 
     public static function getNavigationBadge(): ?string
     {
-        return (string) Ride::whereIn('status', ['searching', 'accepted', 'ongoing'])->count();
+        try {
+            $count = \Illuminate\Support\Facades\Cache::remember('nav_badge_ride', 30, function () {
+                return Ride::whereIn('status', ['searching', 'accepted', 'ongoing'])->count();
+            });
+            return (string) $count;
+        } catch (\Throwable $e) {
+            return null;
+        }
     }
 
     public static function getNavigationBadgeColor(): ?string
     {
-        return Ride::whereIn('status', ['ongoing'])->count() > 0 ? 'success' : 'gray';
+        return 'success';
     }
 }

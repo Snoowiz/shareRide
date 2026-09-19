@@ -223,3 +223,130 @@ export function formatNotificationTime(dateStr: string): string {
   if (diffDays < 7) return `${diffDays}d ago`;
   return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 }
+
+// ── Centralized Transactional Email & Backend Notification Service ──
+const NOTIFICATION_API_BASE = process.env.EXPO_PUBLIC_ADMIN_API_URL || 'http://127.0.0.1:8000';
+const NOTIFICATION_API_KEY = process.env.EXPO_PUBLIC_NOTIFICATION_API_KEY || process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY || 'goride_secure_notification_secret_2026';
+
+export interface NotificationApiResponse<T = any> {
+  success: boolean;
+  message?: string;
+  error?: string;
+  log_id?: number;
+  data?: T;
+}
+
+/**
+ * Dispatch authenticated HTTP request to GoRide centralized notification backend.
+ * Zero SMTP credentials touch the mobile application.
+ */
+async function sendNotificationRequest<T = any>(endpoint: string, payload: Record<string, any>): Promise<NotificationApiResponse<T>> {
+  try {
+    const url = `${NOTIFICATION_API_BASE}/api/v1/notifications/${endpoint}`;
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+        'X-GoRide-Key': NOTIFICATION_API_KEY,
+      },
+      body: JSON.stringify(payload),
+    });
+
+    const data = await response.json().catch(() => ({ success: false, error: `HTTP ${response.status}: Failed to parse JSON` }));
+    if (!response.ok) {
+      console.warn(`[NotificationService] ${endpoint} returned HTTP ${response.status}:`, data);
+      return { success: false, error: data.error || data.message || `HTTP ${response.status}` };
+    }
+    return data;
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : 'Network request failed';
+    console.error(`[NotificationService] Error contacting ${endpoint}:`, msg);
+    return { success: false, error: msg };
+  }
+}
+
+/**
+ * Send password reset email with secure OTP and reset link.
+ */
+export async function triggerPasswordResetEmail(params: {
+  email: string;
+  name?: string;
+  resetLink?: string;
+  otpCode?: string;
+  expiryMinutes?: number;
+}): Promise<NotificationApiResponse> {
+  return sendNotificationRequest('password-reset', {
+    email: params.email,
+    name: params.name,
+    reset_link: params.resetLink,
+    otp_code: params.otpCode,
+    expiry_minutes: params.expiryMinutes || 30,
+  });
+}
+
+/**
+ * Send support ticket / complaint received confirmation email.
+ */
+export async function triggerComplaintConfirmationEmail(params: {
+  email: string;
+  name?: string;
+  ticketId: string;
+  ticketSubject?: string;
+  ticketCategory?: string;
+}): Promise<NotificationApiResponse> {
+  return sendNotificationRequest('complaint-received', {
+    email: params.email,
+    name: params.name,
+    ticket_id: params.ticketId,
+    ticket_subject: params.ticketSubject,
+    ticket_category: params.ticketCategory,
+  });
+}
+
+/**
+ * Send ride update or e-receipt email to rider.
+ */
+export async function triggerRideUpdateEmail(params: {
+  email: string;
+  name?: string;
+  rideId: string;
+  status: string;
+  driverName?: string;
+  pickupLocation?: string;
+  destinationLocation?: string;
+  fare?: number;
+  paymentMethod?: string;
+}): Promise<NotificationApiResponse> {
+  return sendNotificationRequest('ride-update', {
+    email: params.email,
+    name: params.name,
+    ride_id: params.rideId,
+    status: params.status,
+    driver_name: params.driverName,
+    pickup_location: params.pickupLocation,
+    destination_location: params.destinationLocation,
+    fare: params.fare,
+    payment_method: params.paymentMethod,
+  });
+}
+
+/**
+ * Universal dynamic template trigger for welcome, announcements, and custom events.
+ */
+export async function triggerTemplateEmail(params: {
+  templateKey: string;
+  toEmail: string;
+  variables?: Record<string, any>;
+  recipientName?: string;
+  overrideSubject?: string;
+}): Promise<NotificationApiResponse> {
+  return sendNotificationRequest('send-template', {
+    template_key: params.templateKey,
+    to_email: params.toEmail,
+    variables: params.variables || {},
+    recipient_name: params.recipientName,
+    override_subject: params.overrideSubject,
+  });
+}
+

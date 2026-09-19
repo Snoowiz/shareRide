@@ -10,6 +10,7 @@ import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/context/AuthContext';
 import { useAppContext } from '@/context/AppContext';
 import { Colors } from '@/constants/Colors';
+import { triggerComplaintConfirmationEmail } from '@/lib/notifications';
 
 export default function SupportChatScreen() {
   const router = useRouter();
@@ -107,6 +108,19 @@ export default function SupportChatScreen() {
 
     if (newTicketErr) throw newTicketErr;
     setTicketId(newTicket.id);
+
+    // Send confirmation email via centralized GoRide notification service
+    if (authUser?.email) {
+      const senderName = authUser.firstName ? `${authUser.firstName} ${authUser.lastName}`.trim() : (authUser.email.split('@')[0] || 'Valued User');
+      triggerComplaintConfirmationEmail({
+        email: authUser.email,
+        name: senderName,
+        ticketId: newTicket.id,
+        ticketSubject: ticketSubject || 'General Support Inquiry',
+        ticketCategory: topicType || 'General Support',
+      }).catch(err => console.warn('Complaint email notification warning:', err));
+    }
+
     return newTicket.id;
   };
 

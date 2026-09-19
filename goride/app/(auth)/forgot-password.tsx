@@ -8,6 +8,7 @@ import { useAuth } from '@/context/AuthContext';
 import { useAppContext } from '@/context/AppContext';
 import { Colors } from '@/constants/Colors';
 import AlertModal from '@/components/AlertModal';
+import { triggerPasswordResetEmail } from '@/lib/notifications';
 
 export default function ForgotPasswordScreen() {
   const router = useRouter();
@@ -46,6 +47,14 @@ export default function ForgotPasswordScreen() {
 
     const { error: resetError } = await resetPassword(trimmed);
     
+    // Trigger branded GoRide transactional email notification via centralized backend
+    if (!resetError) {
+      await triggerPasswordResetEmail({
+        email: trimmed,
+        resetLink: `https://goride.app/reset-password?email=${encodeURIComponent(trimmed)}`,
+      }).catch(err => console.warn('Transactional reset email warning:', err));
+    }
+
     setLoading(false);
     
     if (resetError) {

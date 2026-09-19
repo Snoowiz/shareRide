@@ -148,6 +148,13 @@ class DeliveryResource extends Resource
 
     public static function getNavigationBadge(): ?string
     {
-        return (string) Delivery::whereIn('status', ['searching', 'accepted', 'picked_up', 'in_transit'])->count();
+        try {
+            $count = \Illuminate\Support\Facades\Cache::remember('nav_badge_delivery', 30, function () {
+                return Delivery::whereIn('status', ['searching', 'accepted', 'picked_up', 'in_transit'])->count();
+            });
+            return (string) $count;
+        } catch (\Throwable $e) {
+            return null;
+        }
     }
 }
