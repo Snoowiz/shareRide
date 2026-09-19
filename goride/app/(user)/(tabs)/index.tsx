@@ -3,11 +3,10 @@ import {
   View, Text, StyleSheet, TouchableOpacity,
   ScrollView, Animated, Dimensions, Platform
 } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useRouter, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
-import { useFocusEffect } from '@react-navigation/native';
 import { Image } from 'react-native';
 import { supabase } from '@/lib/supabase';
 import { useAppContext } from '@/context/AppContext';
