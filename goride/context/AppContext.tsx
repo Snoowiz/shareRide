@@ -2,8 +2,21 @@ import React, { createContext, useContext, useState, useEffect } from 'react';
 import { useColorScheme as useSystemColorScheme } from 'react-native';
 import { useAuth } from './AuthContext';
 
+import { getPaymentGatewayConfig } from '@/lib/settings';
+
 export type ThemeMode = 'light' | 'dark' | 'system';
 export type UserRole = 'rider' | 'driver';
+
+export interface PaymentGatewayConfig {
+  paystackEnabled: boolean;
+  paystackMode: 'test' | 'live';
+  paystackPublicKey: string;
+  paystackCurrency: string;
+  enableCashPayments: boolean;
+  enableWalletPayments: boolean;
+  minWalletTopup: number;
+  minDriverWithdrawal: number;
+}
 
 export interface UserProfile {
   id: string;
@@ -32,6 +45,8 @@ interface AppContextType {
   setDestinationLocation: (loc: { latitude: number, longitude: number } | null) => void;
   destinationAddress: string;
   setDestinationAddress: (addr: string) => void;
+  paymentConfig: PaymentGatewayConfig;
+  refreshPaymentConfig: () => Promise<void>;
 }
 
 const emptyUser: UserProfile = {
@@ -99,6 +114,30 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   const userRole: UserRole = authUser?.role === 'driver' ? 'driver' : 'rider';
 
+  const [paymentConfig, setPaymentConfig] = useState<PaymentGatewayConfig>({
+    paystackEnabled: true,
+    paystackMode: 'test',
+    paystackPublicKey: process.env.EXPO_PUBLIC_PAYSTACK_PUBLIC_KEY || '',
+    paystackCurrency: 'NGN',
+    enableCashPayments: true,
+    enableWalletPayments: true,
+    minWalletTopup: 500,
+    minDriverWithdrawal: 1000,
+  });
+
+  const refreshPaymentConfig = async () => {
+    try {
+      const config = await getPaymentGatewayConfig(true);
+      setPaymentConfig(config);
+    } catch (e) {
+      console.warn('Could not refresh payment config:', e);
+    }
+  };
+
+  useEffect(() => {
+    refreshPaymentConfig();
+  }, []);
+
   return (
     <AppContext.Provider
       value={{
@@ -116,6 +155,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         setDestinationLocation,
         destinationAddress,
         setDestinationAddress,
+        paymentConfig,
+        refreshPaymentConfig,
       }}
     >
       {children}

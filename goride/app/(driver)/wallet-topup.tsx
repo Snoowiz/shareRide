@@ -25,7 +25,7 @@ export default function WalletTopupScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { authUser } = useAuth();
-  const { colorScheme } = useAppContext();
+  const { colorScheme, paymentConfig } = useAppContext();
   const C = Colors[colorScheme];
   const isDark = colorScheme === 'dark';
 
@@ -93,11 +93,22 @@ export default function WalletTopupScreen() {
   };
 
   const handleContinue = () => {
-    if (amount < 100) {
+    if (paymentConfig?.paystackEnabled === false) {
+      setAlertConfig({
+        visible: true,
+        title: 'Gateway Unavailable',
+        message: 'Online top-up via Paystack is currently disabled by administrator.',
+        type: 'warning'
+      });
+      return;
+    }
+
+    const minTopup = paymentConfig?.minWalletTopup || 500;
+    if (amount < minTopup) {
       setAlertConfig({
         visible: true,
         title: 'Invalid Amount',
-        message: 'Minimum top-up amount is ₦100',
+        message: `Minimum top-up amount is ₦${minTopup.toLocaleString()}`,
         type: 'warning'
       });
       return;

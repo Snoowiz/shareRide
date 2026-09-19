@@ -43,9 +43,12 @@ export default function PaymentSettlementModal({
   onSettlementComplete,
   onClose,
 }: PaymentSettlementModalProps) {
-  const { colorScheme } = useAppContext();
+  const { colorScheme, paymentConfig } = useAppContext();
   const isDark = colorScheme === 'dark';
   const C = Colors[colorScheme];
+
+  const isPaystackEnabled = paymentConfig?.paystackEnabled ?? true;
+  const isCashEnabled = paymentConfig?.enableCashPayments ?? true;
 
   const [processing, setProcessing] = useState(false);
   const [selectedMethod, setSelectedMethod] = useState<'paystack' | 'cash' | null>(null);
@@ -60,7 +63,7 @@ export default function PaymentSettlementModal({
   const driverPayout = Math.round((fareAmount - commissionAmount) * 100) / 100;
   // For Handle Cash: deduct ONLY the commission from wallet (driver got the full fare in cash)
   const cashDeduction = commissionAmount;
-  const canHandleCash = driverWalletBalance >= cashDeduction;
+  const canHandleCash = isCashEnabled && (driverWalletBalance >= cashDeduction);
 
   // ── Block Android back button while modal is visible ──
   useEffect(() => {
@@ -337,73 +340,77 @@ export default function PaymentSettlementModal({
           <Text style={[s.optionsTitle, { color: C.text }]}>How was the payment handled?</Text>
 
           {/* Option 1: Paystack */}
-          <TouchableOpacity
-            style={[
-              s.optionCard,
-              {
-                backgroundColor: selectedMethod === 'paystack' ? '#3B82F610' : C.surface,
-                borderColor: selectedMethod === 'paystack' ? '#3B82F6' : C.border,
-              },
-            ]}
-            onPress={() => setSelectedMethod('paystack')}
-            activeOpacity={0.8}
-            disabled={processing}
-          >
-            <View style={[s.optionIcon, { backgroundColor: '#3B82F615' }]}>
-              <MaterialCommunityIcons name="credit-card-outline" size={24} color="#3B82F6" />
-            </View>
-            <View style={s.optionInfo}>
-              <Text style={[s.optionTitle, { color: C.text }]}>Payment Topup</Text>
-              <Text style={[s.optionDesc, { color: C.textMuted }]}>
-                Pay ₦{fareAmount.toLocaleString()} via Paystack. You receive ₦{driverPayout.toLocaleString()} to wallet.
-              </Text>
-            </View>
-            {selectedMethod === 'paystack' && (
-              <Ionicons name="checkmark-circle" size={24} color="#3B82F6" />
-            )}
-          </TouchableOpacity>
+          {isPaystackEnabled && (
+            <TouchableOpacity
+              style={[
+                s.optionCard,
+                {
+                  backgroundColor: selectedMethod === 'paystack' ? '#3B82F610' : C.surface,
+                  borderColor: selectedMethod === 'paystack' ? '#3B82F6' : C.border,
+                },
+              ]}
+              onPress={() => setSelectedMethod('paystack')}
+              activeOpacity={0.8}
+              disabled={processing}
+            >
+              <View style={[s.optionIcon, { backgroundColor: '#3B82F615' }]}>
+                <MaterialCommunityIcons name="credit-card-outline" size={24} color="#3B82F6" />
+              </View>
+              <View style={s.optionInfo}>
+                <Text style={[s.optionTitle, { color: C.text }]}>Payment Topup</Text>
+                <Text style={[s.optionDesc, { color: C.textMuted }]}>
+                  Pay ₦{fareAmount.toLocaleString()} via Paystack. You receive ₦{driverPayout.toLocaleString()} to wallet.
+                </Text>
+              </View>
+              {selectedMethod === 'paystack' && (
+                <Ionicons name="checkmark-circle" size={24} color="#3B82F6" />
+              )}
+            </TouchableOpacity>
+          )}
 
           {/* Option 2: Cash */}
-          <TouchableOpacity
-            style={[
-              s.optionCard,
-              {
-                backgroundColor: !canHandleCash
-                  ? (isDark ? '#1E293B' : '#F8FAFC')
-                  : selectedMethod === 'cash' ? '#22C55E10' : C.surface,
-                borderColor: !canHandleCash
-                  ? (isDark ? '#334155' : '#E2E8F0')
-                  : selectedMethod === 'cash' ? '#22C55E' : C.border,
-                opacity: canHandleCash ? 1 : 0.6,
-              },
-            ]}
-            onPress={() => canHandleCash && setSelectedMethod('cash')}
-            activeOpacity={canHandleCash ? 0.8 : 1}
-            disabled={!canHandleCash || processing}
-          >
-            <View style={[s.optionIcon, { backgroundColor: canHandleCash ? '#22C55E15' : '#EF444415' }]}>
-              <MaterialCommunityIcons
-                name="cash"
-                size={24}
-                color={canHandleCash ? '#22C55E' : '#EF4444'}
-              />
-            </View>
-            <View style={s.optionInfo}>
-              <Text style={[s.optionTitle, { color: canHandleCash ? C.text : C.textMuted }]}>Handle Cash</Text>
-              {canHandleCash ? (
-                <Text style={[s.optionDesc, { color: C.textMuted }]}>
-                  Rider paid cash. ₦{cashDeduction.toLocaleString()} deducted from wallet (commission only).
-                </Text>
-              ) : (
-                <Text style={[s.optionDesc, { color: '#EF4444' }]}>
-                  Insufficient balance. Need ₦{cashDeduction.toLocaleString()}, have ₦{driverWalletBalance.toLocaleString()}. Top up first.
-                </Text>
+          {isCashEnabled && (
+            <TouchableOpacity
+              style={[
+                s.optionCard,
+                {
+                  backgroundColor: !canHandleCash
+                    ? (isDark ? '#1E293B' : '#F8FAFC')
+                    : selectedMethod === 'cash' ? '#22C55E10' : C.surface,
+                  borderColor: !canHandleCash
+                    ? (isDark ? '#334155' : '#E2E8F0')
+                    : selectedMethod === 'cash' ? '#22C55E' : C.border,
+                  opacity: canHandleCash ? 1 : 0.6,
+                },
+              ]}
+              onPress={() => canHandleCash && setSelectedMethod('cash')}
+              activeOpacity={canHandleCash ? 0.8 : 1}
+              disabled={!canHandleCash || processing}
+            >
+              <View style={[s.optionIcon, { backgroundColor: canHandleCash ? '#22C55E15' : '#EF444415' }]}>
+                <MaterialCommunityIcons
+                  name="cash"
+                  size={24}
+                  color={canHandleCash ? '#22C55E' : '#EF4444'}
+                />
+              </View>
+              <View style={s.optionInfo}>
+                <Text style={[s.optionTitle, { color: canHandleCash ? C.text : C.textMuted }]}>Handle Cash</Text>
+                {canHandleCash ? (
+                  <Text style={[s.optionDesc, { color: C.textMuted }]}>
+                    Rider paid cash. ₦{cashDeduction.toLocaleString()} deducted from wallet (commission only).
+                  </Text>
+                ) : (
+                  <Text style={[s.optionDesc, { color: '#EF4444' }]}>
+                    Insufficient balance. Need ₦{cashDeduction.toLocaleString()}, have ₦{driverWalletBalance.toLocaleString()}. Top up first.
+                  </Text>
+                )}
+              </View>
+              {selectedMethod === 'cash' && canHandleCash && (
+                <Ionicons name="checkmark-circle" size={24} color="#22C55E" />
               )}
-            </View>
-            {selectedMethod === 'cash' && canHandleCash && (
-              <Ionicons name="checkmark-circle" size={24} color="#22C55E" />
-            )}
-          </TouchableOpacity>
+            </TouchableOpacity>
+          )}
 
           {/* Wallet balance indicator */}
           <View style={[s.walletIndicator, { backgroundColor: C.surfaceAlt, borderColor: C.border }]}>

@@ -167,20 +167,31 @@ function RootLayoutInner() {
   );
 }
 
+function DynamicPaystackWrapper({ children }: { children: React.ReactNode }) {
+  const { paymentConfig } = useAppContext();
+  const activePublicKey = paymentConfig.paystackPublicKey || process.env.EXPO_PUBLIC_PAYSTACK_PUBLIC_KEY || '';
+
+  return (
+    <PaystackProvider 
+      publicKey={activePublicKey}
+      defaultChannels={['card', 'bank', 'ussd', 'bank_transfer']}
+    >
+      {children}
+    </PaystackProvider>
+  );
+}
+
 export default function RootLayout() {
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <AuthProvider>
-        <PaystackProvider 
-          publicKey={process.env.EXPO_PUBLIC_PAYSTACK_PUBLIC_KEY || ''}
-          defaultChannels={['card', 'bank', 'ussd', 'bank_transfer']}
-        >
-          <AppProvider>
+        <AppProvider>
+          <DynamicPaystackWrapper>
             <NotificationProvider>
               <RootLayoutInner />
             </NotificationProvider>
-          </AppProvider>
-        </PaystackProvider>
+          </DynamicPaystackWrapper>
+        </AppProvider>
       </AuthProvider>
     </GestureHandlerRootView>
   );

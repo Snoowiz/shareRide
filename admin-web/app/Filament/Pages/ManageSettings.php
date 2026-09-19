@@ -30,7 +30,19 @@ class ManageSettings extends Page implements HasForms
     public function mount(): void
     {
         $settings = Setting::all()->pluck('value', 'key')->toArray();
-        $this->form->fill($settings);
+
+        $defaults = [
+            'paystack_enabled' => true,
+            'paystack_mode' => 'test',
+            'paystack_currency' => 'NGN',
+            'paystack_public_key' => env('EXPO_PUBLIC_PAYSTACK_PUBLIC_KEY', ''),
+            'enable_cash_payments' => true,
+            'enable_wallet_payments' => true,
+            'min_wallet_topup' => 500,
+            'min_driver_withdrawal' => 1000,
+        ];
+
+        $this->form->fill(array_merge($defaults, $settings));
     }
 
     public function form(Schema $schema): Schema
@@ -85,6 +97,79 @@ class ManageSettings extends Page implements HasForms
                                     ->step(0.1)
                                     ->default(2.5),
                             ]),
+                        \Filament\Schemas\Components\Tabs\Tab::make('Payment Gateways')
+                            ->icon('heroicon-o-credit-card')
+                            ->schema([
+                                \Filament\Schemas\Components\Section::make('Paystack Gateway')
+                                    ->description('Configure Paystack for mobile app settlements, package deliveries, and wallet top-ups.')
+                                    ->icon('heroicon-o-banknotes')
+                                    ->columns(2)
+                                    ->schema([
+                                        Forms\Components\Toggle::make('paystack_enabled')
+                                            ->label('Enable Paystack Gateway')
+                                            ->helperText('Enable or disable Paystack payments across the mobile app.')
+                                            ->default(true),
+                                        Forms\Components\Select::make('paystack_mode')
+                                            ->label('Environment Mode')
+                                            ->options([
+                                                'test' => 'Test Mode (Sandbox)',
+                                                'live' => 'Live Mode (Production)',
+                                            ])
+                                            ->default('test')
+                                            ->required(),
+                                        Forms\Components\TextInput::make('paystack_public_key')
+                                            ->label('Paystack Public Key')
+                                            ->placeholder('pk_test_... or pk_live_...')
+                                            ->helperText('Used by the mobile app to initialize card & transfer payment sheets.')
+                                            ->columnSpan(1),
+                                        Forms\Components\TextInput::make('paystack_secret_key')
+                                            ->label('Paystack Secret Key')
+                                            ->placeholder('sk_test_... or sk_live_...')
+                                            ->password()
+                                            ->revealable()
+                                            ->helperText('Used by the server to verify payments. Kept strictly private.')
+                                            ->columnSpan(1),
+                                        Forms\Components\Select::make('paystack_currency')
+                                            ->label('Transaction Currency')
+                                            ->options([
+                                                'NGN' => 'Nigerian Naira (NGN ₦)',
+                                                'GHS' => 'Ghanaian Cedi (GHS ₵)',
+                                                'KES' => 'Kenyan Shilling (KES KSh)',
+                                                'USD' => 'US Dollar (USD $)',
+                                            ])
+                                            ->default('NGN'),
+                                        Forms\Components\TextInput::make('paystack_merchant_email')
+                                            ->label('Merchant Support Email')
+                                            ->placeholder('payments@goride.app')
+                                            ->email()
+                                            ->helperText('Displayed on Paystack payment receipts.'),
+                                    ]),
+
+                                \Filament\Schemas\Components\Section::make('Cash & Wallet Operations')
+                                    ->description('Configure offline cash settlements and internal wallet operations.')
+                                    ->icon('heroicon-o-wallet')
+                                    ->columns(2)
+                                    ->schema([
+                                        Forms\Components\Toggle::make('enable_cash_payments')
+                                            ->label('Enable Cash on Delivery / Ride')
+                                            ->helperText('Allow passengers and parcel senders to pay drivers directly in cash.')
+                                            ->default(true),
+                                        Forms\Components\Toggle::make('enable_wallet_payments')
+                                            ->label('Enable In-App Wallet')
+                                            ->helperText('Allow users and drivers to pay and receive earnings via wallet balance.')
+                                            ->default(true),
+                                        Forms\Components\TextInput::make('min_wallet_topup')
+                                            ->label('Minimum Wallet Top-up')
+                                            ->numeric()
+                                            ->prefix('NGN')
+                                            ->default(500),
+                                        Forms\Components\TextInput::make('min_driver_withdrawal')
+                                            ->label('Minimum Driver Withdrawal')
+                                            ->numeric()
+                                            ->prefix('NGN')
+                                            ->default(1000),
+                                    ]),
+                            ]),
                         \Filament\Schemas\Components\Tabs\Tab::make('Email Templates')
                             ->icon('heroicon-o-envelope')
                             ->schema([
@@ -124,7 +209,7 @@ class ManageSettings extends Page implements HasForms
         foreach ($data as $key => $value) {
             Setting::updateOrCreate(
                 ['key' => $key],
-                ['value' => $value]
+                ['value' => $value ?? '']
             );
         }
 

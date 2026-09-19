@@ -60,9 +60,20 @@ The admin dashboard is located in `/admin-web`. It is used to manage the entire 
 
 ---
 
+## 🧪 Mandatory Functional Verification & Cross-Checking
+
+For every feature implemented from now henceforth:
+1. **Fully Functional**: Never leave code as mock or incomplete when dynamic functionality is requested. All features must be fully wired up, tested, and operational.
+2. **Cross-Platform Sync**: When a setting, schema, or feature is added to the Admin Panel, cross-check and ensure it immediately syncs and integrates with the Mobile App (and vice-versa).
+3. **Thorough Testing Before Completion**: Verify end-to-end functionality (running commands, checking logs, verifying database records, and browser UI tests) BEFORE marking tasks completed or reporting to the user.
+4. **Resilience & Fallbacks**: Provide safe fallbacks (e.g. environment variable fallbacks if database settings are not yet populated) so the system remains resilient at all times.
+
+---
+
 ## 📝 Final Reminder
 
 Before every feature implementation:
 - Read this file and follow it strictly.
 - Build clean, simple, and maintainable solutions.
 - Keep the app easy to teach and explain.
+- Test and verify thoroughly on both Admin Web and Mobile App before completion.
