@@ -1,0 +1,48 @@
+# Environment variables
+.env
+.env.*
+!.env.example
+
+# Large Archives
+*.rar
+*.zip
+*.tar.gz
+*.7z
+
+# Node / Vendor dependencies
+node_modules/
+vendor/
+admin-web/node_modules/
+admin-web/vendor/
+goride/node_modules/
+
+# Expo / Mobile artifacts
+.expo/
+dist/
+web-build/
+goride/.expo/
+goride/dist/
+goride/web-build/
+
+# Laravel specifics
+admin-web/public/storage
+admin-web/public/hot
+admin-web/storage/*.key
+admin-web/storage/logs/*.log
+admin-web/storage/framework/cache/*
+admin-web/storage/framework/sessions/*
+admin-web/storage/framework/views/*
+!admin-web/storage/framework/cache/.gitignore
+!admin-web/storage/framework/sessions/.gitignore
+!admin-web/storage/framework/views/.gitignore
+
+# Test & temporary files
+test_models.php
+scratch/
+.system_generated/
+
+# OS / IDE
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

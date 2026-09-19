@@ -1,0 +1,26 @@
+<svg width="40" height="80" viewBox="0 0 40 80" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <g filter="url(#shadow)">
+    <!-- Car Body -->
+    <rect x="6" y="10" width="28" height="60" rx="12" fill="#FFFFFF" stroke="#E2E8F0" stroke-width="1"/>
+    <!-- Windshield -->
+    <path d="M 10 28 C 10 22 30 22 30 28 L 32 45 C 32 45 8 45 8 45 Z" fill="#0F172A"/>
+    <!-- Panoramic Roof connecting to rear -->
+    <rect x="12" y="45" width="16" height="10" fill="#0F172A"/>
+    <!-- Rear Window -->
+    <path d="M 12 55 C 12 62 28 62 28 55 Z" fill="#0F172A"/>
+    <!-- Headlights -->
+    <rect x="8" y="11" width="6" height="3" rx="1.5" fill="#FACC15"/>
+    <rect x="26" y="11" width="6" height="3" rx="1.5" fill="#FACC15"/>
+    <!-- Taillights -->
+    <rect x="8" y="67" width="8" height="3" rx="1.5" fill="#EF4444"/>
+    <rect x="24" y="67" width="8" height="3" rx="1.5" fill="#EF4444"/>
+    <!-- Side Mirrors -->
+    <rect x="4" y="28" width="4" height="6" rx="2" fill="#0F172A"/>
+    <rect x="32" y="28" width="4" height="6" rx="2" fill="#0F172A"/>
+  </g>
+  <defs>
+    <filter id="shadow" x="0" y="0" width="40" height="80" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+      <feDropShadow dx="0" dy="3" stdDeviation="3" flood-opacity="0.3"/>
+    </filter>
+  </defs>
+</svg>
