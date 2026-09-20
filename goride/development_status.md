@@ -38,7 +38,11 @@ This document tracks the implementation status of the GoRide application feature
 ## 🟡 Semi-Dynamic Features
 - **Driver Verification**: Multi-step signup flow persists data to Supabase; `hasDriverProfile` gates dashboard access.
 
-## 🔴 Mock / UI-Only Features (Pending Backend Integration)
+- **Coupons & Promo System**: Fully functional, dynamic coupon infrastructure connecting the Laravel/Filament Admin Panel with the Mobile App (Rider):
+  - **Admin Panel**: Dedicated `Coupons` resource with percentage/fixed discount types, maximum discount cap, minimum ride fare requirement, usage limits, per-user limits, validity windows, and custom card/banner styling (custom background hex color, text color, and optional banner image).
+  - **Database & Sync**: Real-time Supabase integration (`coupons` and `user_coupons` tables) with RLS security policies, usage tracking, and per-user redemption enforcement.
+  - **Rider Home Screen**: Dynamic promo card banner synced in real time via Supabase channel, displaying custom admin styling, code badge, title, and description with 1-tap copy functionality and `AlertModal` confirmation.
+  - **Checkout / Booking Flow**: Interactive "Apply Promo" feature in `book-ride.tsx` featuring an on-demand modal with manual promo code entry, available promo list selection, validation against active dates, minimum fare, and per-user limits, immediate fare recalculation, and automatic redemption logging upon ride creation.
 - **Performance Graphs**: Distance and Average Hours charts.
 - **Admin Notifications**: Coupon distribution, promo campaigns, and admin announcements (notification types exist, awaiting admin dashboard to trigger them).
 

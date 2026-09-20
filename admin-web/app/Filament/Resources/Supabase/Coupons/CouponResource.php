@@ -19,13 +19,17 @@ class CouponResource extends Resource
     protected static ?string $model = Coupon::class;
 
     protected static string|BackedEnum|null $navigationIcon = 'heroicon-o-ticket';
-    protected static string | \UnitEnum | null $navigationGroup = 'Financials';
+    protected static string | \UnitEnum | null $navigationGroup = 'Finance';
     protected static ?string $navigationLabel = 'Coupons';
     protected static ?int $navigationSort = 3;
+    protected static ?string $slug = 'coupons';
 
     public static function canAccess(): bool
     {
-        return auth()->user()?->can('manage_coupons') ?? false;
+        $user = auth()->user();
+        if (!$user) return false;
+        if ($user->hasRole('super_admin') || ($user->is_super_admin ?? false)) return true;
+        return $user->can('manage_coupons');
     }
 
     protected static ?string $recordTitleAttribute = 'code';

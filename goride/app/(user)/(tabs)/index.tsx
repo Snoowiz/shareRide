@@ -1,18 +1,19 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity,
-  ScrollView, Animated, Dimensions, Platform
+  ScrollView, Animated, Dimensions, Platform, Image, ImageBackground
 } from 'react-native';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
-import { Image } from 'react-native';
+import * as Clipboard from 'expo-clipboard';
 import { supabase } from '@/lib/supabase';
 import { useAppContext } from '@/context/AppContext';
 import { useAuth } from '@/context/AuthContext';
 import { Colors } from '@/constants/Colors';
 import NotificationBell from '@/components/NotificationBell';
+import AlertModal from '@/components/AlertModal';
 import * as Location from 'expo-location';
 import LocationPermissionModal from '@/components/LocationPermissionModal';
 import PremiumVehicleMarker from '@/components/PremiumVehicleMarker';
@@ -49,6 +50,22 @@ type RecentPlace = {
   lng: number;
 };
 
+type PromoCoupon = {
+  id: number;
+  code: string;
+  title: string | null;
+  description: string | null;
+  discount_type: 'percentage' | 'fixed';
+  discount_percentage: number | null;
+  discount_amount: number | null;
+  max_discount_amount: number | null;
+  min_ride_fare: number | null;
+  banner_image_url: string | null;
+  bg_color: string | null;
+  text_color: string | null;
+  valid_until: string | null;
+};
+
 export default function HomeScreen() {
   const { colorScheme, setDestinationLocation, setDestinationAddress } = useAppContext();
   const { authUser } = useAuth();
@@ -58,6 +75,19 @@ export default function HomeScreen() {
   const insets = useSafeAreaInsets();
   const [drivers, setDrivers] = useState<any[]>([]);
   const [recentPlaces, setRecentPlaces] = useState<RecentPlace[]>([]);
+  const [featuredCoupon, setFeaturedCoupon] = useState<PromoCoupon | null>(null);
+  const [alertConfig, setAlertConfig] = useState<{
+    visible: boolean;
+    title: string;
+    message: string;
+    type: 'success' | 'info' | 'warning' | 'error';
+    onConfirm?: () => void;
+  }>({
+    visible: false,
+    title: '',
+    message: '',
+    type: 'info',
+  });
   const scaleAnim = useRef(new Animated.Value(1)).current;
   const mapRef = useRef<any>(null);
   const { currentLocation } = useAppContext();
@@ -67,8 +97,47 @@ export default function HomeScreen() {
   const [showPermissionModal, setShowPermissionModal] = useState(false);
   const { setCurrentLocation, setCurrentAddress } = useAppContext();
 
+  const fetchFeaturedCoupon = useCallback(async () => {
+    try {
+      const { data, error } = await supabase
+        .from('coupons')
+        .select('*')
+        .eq('is_active', true)
+        .eq('show_on_home', true)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (!error && data) {
+        setFeaturedCoupon(data);
+      } else if (!data) {
+        setFeaturedCoupon(null);
+      }
+    } catch (err) {
+      console.warn('Error fetching featured coupon:', err);
+    }
+  }, []);
+
+  const handleCouponPress = async () => {
+    if (!featuredCoupon?.code) return;
+    try {
+      await Clipboard.setStringAsync(featuredCoupon.code);
+    } catch (e) {
+      console.warn('Clipboard copy error:', e);
+    }
+    setAlertConfig({
+      visible: true,
+      title: 'Promo Code Copied!',
+      message: `Code "${featuredCoupon.code}" copied to clipboard! You can apply it when booking your next ride for an instant discount.`,
+      type: 'success',
+      onConfirm: () => setAlertConfig(prev => ({ ...prev, visible: false })),
+    });
+  };
+
   useFocusEffect(
     React.useCallback(() => {
+      fetchFeaturedCoupon();
+
       if (authUser?.id) {
         // Fetch saved places
         supabase
@@ -116,8 +185,28 @@ export default function HomeScreen() {
           supabase.removeChannel(channel);
         };
       }
-    }, [authUser])
+    }, [authUser, fetchFeaturedCoupon])
   );
+
+  // Subscribe to real-time coupon updates so changes in Admin Panel reflect instantly
+  useEffect(() => {
+    fetchFeaturedCoupon();
+
+    const couponChannel = supabase
+      .channel('home-coupon-sync')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'coupons' },
+        () => {
+          fetchFeaturedCoupon();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(couponChannel);
+    };
+  }, [fetchFeaturedCoupon]);
 
   // Check location permission on mount
   useEffect(() => {
@@ -419,19 +508,68 @@ export default function HomeScreen() {
           </TouchableOpacity>
         </View>
 
-        {/* Promo */}
-        <View style={s.section}>
-          <LinearGradient colors={[Colors.brand.primary, Colors.brand.primaryLight]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={s.promo}>
-            <View>
-              <Text style={s.promoTag}>LIMITED OFFER</Text>
-              <Text style={s.promoTitle}>20% off your next 3 rides</Text>
-              <Text style={s.promoSub}>Use code GORIDE20</Text>
-            </View>
-            <View style={s.promoIcon}>
-              <Ionicons name="gift-outline" size={32} color="rgba(255,255,255,0.9)" />
-            </View>
-          </LinearGradient>
-        </View>
+        {/* Dynamic Promo Banner */}
+        {featuredCoupon && (
+          <View style={s.section}>
+            <TouchableOpacity activeOpacity={0.9} onPress={handleCouponPress}>
+              {featuredCoupon.banner_image_url ? (
+                <ImageBackground
+                  source={{ uri: featuredCoupon.banner_image_url }}
+                  style={s.promo}
+                  imageStyle={{ borderRadius: 10 }}
+                >
+                  <LinearGradient
+                    colors={['rgba(15,52,110,0.85)', 'rgba(15,23,42,0.85)']}
+                    style={[StyleSheet.absoluteFillObject, { borderRadius: 10 }]}
+                  />
+                  <View style={{ flex: 1, zIndex: 1, paddingRight: 8 }}>
+                    <Text style={[s.promoTag, { color: featuredCoupon.text_color || '#fff' }]}>
+                      {featuredCoupon.title || 'LIMITED OFFER'}
+                    </Text>
+                    <Text style={[s.promoTitle, { color: featuredCoupon.text_color || '#fff' }]}>
+                      {featuredCoupon.description || 'Exclusive ride discount'}
+                    </Text>
+                    <View style={s.codeBadge}>
+                      <Ionicons name="copy-outline" size={13} color="#fff" />
+                      <Text style={s.codeBadgeTxt}>Use code {featuredCoupon.code}</Text>
+                    </View>
+                  </View>
+                  <View style={[s.promoIcon, { zIndex: 1 }]}>
+                    <Ionicons name="gift-outline" size={30} color="rgba(255,255,255,0.95)" />
+                  </View>
+                </ImageBackground>
+              ) : (
+                <LinearGradient
+                  colors={[
+                    featuredCoupon.bg_color || Colors.brand.primary,
+                    (featuredCoupon.bg_color || Colors.brand.primary).toLowerCase() === Colors.brand.primary.toLowerCase()
+                      ? Colors.brand.primaryLight
+                      : '#1E293B'
+                  ]}
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 1, y: 0 }}
+                  style={s.promo}
+                >
+                  <View style={{ flex: 1, paddingRight: 8 }}>
+                    <Text style={[s.promoTag, { color: 'rgba(255,255,255,0.85)' }]}>
+                      {featuredCoupon.title || 'LIMITED OFFER'}
+                    </Text>
+                    <Text style={[s.promoTitle, { color: featuredCoupon.text_color || '#fff' }]}>
+                      {featuredCoupon.description || 'Special ride discount'}
+                    </Text>
+                    <View style={s.codeBadge}>
+                      <Ionicons name="copy-outline" size={13} color="#fff" />
+                      <Text style={s.codeBadgeTxt}>Use code {featuredCoupon.code}</Text>
+                    </View>
+                  </View>
+                  <View style={s.promoIcon}>
+                    <Ionicons name="gift-outline" size={32} color="rgba(255,255,255,0.95)" />
+                  </View>
+                </LinearGradient>
+              )}
+            </TouchableOpacity>
+          </View>
+        )}
 
         {/* Recent */}
         {recentPlaces.length > 0 && (
@@ -474,11 +612,37 @@ export default function HomeScreen() {
         onDeny={handlePermissionDeny}
         role="user"
       />
+
+      <AlertModal
+        isVisible={alertConfig.visible}
+        title={alertConfig.title}
+        message={alertConfig.message}
+        type={alertConfig.type}
+        onConfirm={alertConfig.onConfirm}
+        onClose={() => setAlertConfig(prev => ({ ...prev, visible: false }))}
+      />
     </View>
   );
 }
 
 const s = StyleSheet.create({
+  codeBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: 'rgba(255,255,255,0.22)',
+    alignSelf: 'flex-start',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 8,
+    marginTop: 4,
+  },
+  codeBadgeTxt: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#fff',
+    letterSpacing: 0.3,
+  },
   root: { flex: 1 },
   mapContainer: { position: 'absolute', top: 0, left: 0, right: 0, height: height * 0.4 },
   map: { width: '100%', height: '100%' },

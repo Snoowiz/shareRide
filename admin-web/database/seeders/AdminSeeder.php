@@ -31,6 +31,9 @@ class AdminSeeder extends Seeder
             // Wallets & Finance
             'view_wallets', 'view_transactions', 'manage_withdrawals', 'process_payouts',
 
+            // Promotions & Coupons
+            'manage_coupons',
+
             // Support
             'view_support_tickets', 'reply_support_tickets', 'close_support_tickets',
 

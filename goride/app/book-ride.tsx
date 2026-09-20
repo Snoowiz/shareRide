@@ -1,5 +1,5 @@
-import React, { useState, useRef, useEffect } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Platform, Dimensions, ActivityIndicator } from 'react-native';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Platform, Dimensions, ActivityIndicator, TextInput } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -28,6 +28,26 @@ import { Colors } from '@/constants/Colors';
 
 const GOOGLE_API_KEY = process.env.EXPO_PUBLIC_GOOGLE_MAPS_APIKEY || '';
 const { height } = Dimensions.get('window');
+
+type PromoCoupon = {
+  id: number;
+  code: string;
+  title: string | null;
+  description: string | null;
+  discount_type: 'percentage' | 'fixed';
+  discount_percentage: number | null;
+  discount_amount: number | null;
+  max_discount_amount: number | null;
+  min_ride_fare: number | null;
+  banner_image_url: string | null;
+  bg_color: string | null;
+  text_color: string | null;
+  valid_from: string | null;
+  valid_until: string | null;
+  usage_limit: number | null;
+  times_used: number | null;
+  per_user_limit: number | null;
+};
 
 type RideType = {
   id: string;
@@ -95,6 +115,15 @@ export default function BookRideScreen() {
   const [isScheduleSuccessVisible, setIsScheduleSuccessVisible] = useState(false);
   const [currentRideId, setCurrentRideId] = useState<string | null>(null);
 
+  // Promo Coupon State
+  const [appliedCoupon, setAppliedCoupon] = useState<PromoCoupon | null>(null);
+  const [discountAmount, setDiscountAmount] = useState<number>(0);
+  const [isPromoModalVisible, setIsPromoModalVisible] = useState(false);
+  const [promoInputCode, setPromoInputCode] = useState('');
+  const [promoError, setPromoError] = useState<string | null>(null);
+  const [isValidatingPromo, setIsValidatingPromo] = useState(false);
+  const [availableCoupons, setAvailableCoupons] = useState<PromoCoupon[]>([]);
+
   // Custom Alert State
   const [alertConfig, setAlertConfig] = useState<{
     visible: boolean;
@@ -109,6 +138,152 @@ export default function BookRideScreen() {
     message: '',
     type: 'info',
   });
+
+  const calculateCouponDiscount = useCallback((coupon: PromoCoupon, fare: number): number => {
+    let disc = 0;
+    if (coupon.discount_type === 'percentage') {
+      const pct = coupon.discount_percentage || 0;
+      disc = Math.round((fare * pct) / 100);
+      if (coupon.max_discount_amount && disc > coupon.max_discount_amount) {
+        disc = coupon.max_discount_amount;
+      }
+    } else {
+      disc = coupon.discount_amount || 0;
+    }
+    return Math.min(fare, Math.max(0, disc));
+  }, []);
+
+  const fetchAvailableCoupons = useCallback(async () => {
+    try {
+      const now = new Date().toISOString();
+      const { data, error } = await supabase
+        .from('coupons')
+        .select('*')
+        .eq('is_active', true)
+        .or(`valid_from.is.null,valid_from.lte.${now}`)
+        .or(`valid_until.is.null,valid_until.gte.${now}`)
+        .order('created_at', { ascending: false });
+
+      if (!error && data) {
+        setAvailableCoupons(data as PromoCoupon[]);
+      }
+    } catch (e) {
+      console.warn('Failed to fetch available coupons:', e);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchAvailableCoupons();
+  }, [fetchAvailableCoupons]);
+
+  const computedFareBeforeDiscount = isBidVisible && bidAmount > 0
+    ? bidAmount 
+    : Math.round((selectedRide.baseFare + (distanceKm * selectedRide.pricePerKm) + (durationMins * selectedRide.pricePerMin)) / 50) * 50;
+
+  useEffect(() => {
+    if (appliedCoupon) {
+      if (appliedCoupon.min_ride_fare && computedFareBeforeDiscount < appliedCoupon.min_ride_fare) {
+        setAppliedCoupon(null);
+        setDiscountAmount(0);
+        setAlertConfig({
+          visible: true,
+          title: 'Coupon Removed',
+          message: `This coupon requires a minimum fare of ${formatCurrency(appliedCoupon.min_ride_fare)}.`,
+          type: 'info'
+        });
+      } else {
+        const disc = calculateCouponDiscount(appliedCoupon, computedFareBeforeDiscount);
+        setDiscountAmount(disc);
+      }
+    }
+  }, [selectedRide, distanceKm, durationMins, bidAmount, isBidVisible, appliedCoupon, calculateCouponDiscount, computedFareBeforeDiscount]);
+
+  const handleApplyCouponCode = async (codeToValidate?: string) => {
+    const rawCode = (codeToValidate || promoInputCode).trim().toUpperCase();
+    if (!rawCode) {
+      setPromoError('Please enter a coupon code.');
+      return;
+    }
+    setPromoError(null);
+    setIsValidatingPromo(true);
+
+    try {
+      const { data: coupon, error } = await supabase
+        .from('coupons')
+        .select('*')
+        .ilike('code', rawCode)
+        .eq('is_active', true)
+        .maybeSingle();
+
+      if (error || !coupon) {
+        setPromoError('Invalid or inactive coupon code.');
+        setIsValidatingPromo(false);
+        return;
+      }
+
+      const now = new Date();
+      if (coupon.valid_from && new Date(coupon.valid_from) > now) {
+        setPromoError('This coupon is not yet active.');
+        setIsValidatingPromo(false);
+        return;
+      }
+
+      if (coupon.valid_until && new Date(coupon.valid_until) < now) {
+        setPromoError('This coupon has expired.');
+        setIsValidatingPromo(false);
+        return;
+      }
+
+      if (coupon.usage_limit && coupon.times_used >= coupon.usage_limit) {
+        setPromoError('This coupon has reached its total usage limit.');
+        setIsValidatingPromo(false);
+        return;
+      }
+
+      if (coupon.min_ride_fare && computedFareBeforeDiscount < coupon.min_ride_fare) {
+        setPromoError(`Minimum ride fare of ${formatCurrency(coupon.min_ride_fare)} required.`);
+        setIsValidatingPromo(false);
+        return;
+      }
+
+      // Check per-user limit
+      if (authUser && (coupon.per_user_limit || 1) > 0) {
+        const { count, error: countErr } = await supabase
+          .from('user_coupons')
+          .select('id', { count: 'exact', head: true })
+          .eq('user_id', authUser.id)
+          .eq('coupon_id', coupon.id);
+
+        if (!countErr && count !== null && count >= (coupon.per_user_limit || 1)) {
+          setPromoError(`You have reached the maximum uses (${coupon.per_user_limit || 1}) for this coupon.`);
+          setIsValidatingPromo(false);
+          return;
+        }
+      }
+
+      const disc = calculateCouponDiscount(coupon as PromoCoupon, computedFareBeforeDiscount);
+      setAppliedCoupon(coupon as PromoCoupon);
+      setDiscountAmount(disc);
+      setIsPromoModalVisible(false);
+      setPromoInputCode('');
+      setAlertConfig({
+        visible: true,
+        title: 'Coupon Applied!',
+        message: `Successfully applied code ${coupon.code}! You saved ${formatCurrency(disc)}.`,
+        type: 'success',
+      });
+    } catch (e: any) {
+      console.error(e);
+      setPromoError('Unable to apply coupon. Please try again.');
+    } finally {
+      setIsValidatingPromo(false);
+    }
+  };
+
+  const handleRemoveCoupon = () => {
+    setAppliedCoupon(null);
+    setDiscountAmount(0);
+  };
 
   // Pulse animation for searching
   const pulse = useSharedValue(1);
@@ -258,7 +433,8 @@ export default function BookRideScreen() {
         return;
       }
 
-      const finalFare = isBidVisible ? bidAmount : Math.round((selectedRide.baseFare + (distanceKm * selectedRide.pricePerKm) + (durationMins * selectedRide.pricePerMin)) / 50) * 50;
+      const rawFare = isBidVisible ? bidAmount : Math.round((selectedRide.baseFare + (distanceKm * selectedRide.pricePerKm) + (durationMins * selectedRide.pricePerMin)) / 50) * 50;
+      const finalFare = Math.max(0, rawFare - discountAmount);
 
       const { data, error } = await supabase
         .from('rides')
@@ -283,6 +459,25 @@ export default function BookRideScreen() {
         .single();
 
       if (error) throw error;
+
+      // If coupon applied, record redemption in user_coupons & update usage count
+      if (appliedCoupon && data?.id) {
+        try {
+          await supabase.from('user_coupons').insert({
+            user_id: authUser.id,
+            coupon_id: appliedCoupon.id,
+            ride_id: data.id,
+            discount_applied: discountAmount,
+          });
+
+          await supabase
+            .from('coupons')
+            .update({ times_used: (appliedCoupon.times_used || 0) + 1 })
+            .eq('id', appliedCoupon.id);
+        } catch (couponRecordErr) {
+          console.warn('Coupon record error:', couponRecordErr);
+        }
+      }
 
       if (scheduleTime !== 'Now') {
         // Scheduled ride logic
@@ -532,11 +727,41 @@ export default function BookRideScreen() {
               <Ionicons name="chevron-forward" size={18} color={C.textMuted} />
             </TouchableOpacity>
 
-            <TouchableOpacity style={[s.optionRow, { backgroundColor: C.surface, borderColor: C.border }]}>
-              <MaterialCommunityIcons name="ticket-percent" size={20} color={Colors.brand.secondary} style={{ marginRight: 12 }} />
-              <Text style={[s.optionTxt, { color: C.text }]}>Apply Promo</Text>
-              <Ionicons name="chevron-forward" size={18} color={C.textMuted} />
-            </TouchableOpacity>
+            {appliedCoupon ? (
+              <View style={[s.appliedPromoCard, { backgroundColor: C.surface, borderColor: Colors.brand.secondary }]}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1 }}>
+                  <View style={[s.promoIconBadge, { backgroundColor: Colors.brand.secondary + '20' }]}>
+                    <MaterialCommunityIcons name="ticket-percent" size={20} color={Colors.brand.secondary} />
+                  </View>
+                  <View style={{ flex: 1, marginLeft: 10 }}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                      <Text style={[s.appliedCodeTxt, { color: C.text }]}>{appliedCoupon.code}</Text>
+                      <View style={[s.appliedActiveBadge, { backgroundColor: '#10B98120' }]}>
+                        <Text style={{ fontSize: 10, fontWeight: '700', color: '#10B981' }}>APPLIED</Text>
+                      </View>
+                    </View>
+                    <Text style={[s.appliedDiscTxt, { color: '#10B981' }]}>
+                      Saved {formatCurrency(discountAmount)} ({appliedCoupon.discount_type === 'percentage' ? `${appliedCoupon.discount_percentage}% OFF` : `₦${appliedCoupon.discount_amount} OFF`})
+                    </Text>
+                  </View>
+                </View>
+                <TouchableOpacity onPress={handleRemoveCoupon} style={s.removePromoBtn} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+                  <Ionicons name="close-circle" size={22} color={C.textMuted} />
+                </TouchableOpacity>
+              </View>
+            ) : (
+              <TouchableOpacity 
+                style={[s.optionRow, { backgroundColor: C.surface, borderColor: C.border }]}
+                onPress={() => {
+                  setPromoError(null);
+                  setIsPromoModalVisible(true);
+                }}
+              >
+                <MaterialCommunityIcons name="ticket-percent" size={20} color={Colors.brand.secondary} style={{ marginRight: 12 }} />
+                <Text style={[s.optionTxt, { color: C.text }]}>Apply Promo</Text>
+                <Ionicons name="chevron-forward" size={18} color={C.textMuted} />
+              </TouchableOpacity>
+            )}
           </View>
 
         </BottomSheetScrollView>
@@ -552,9 +777,16 @@ export default function BookRideScreen() {
             {isBooking ? (
               <ActivityIndicator color="#fff" />
             ) : (
-              <Text style={s.bookBtnTxt}>
-                {isBidVisible ? `Bid ${formatCurrency(bidAmount)}` : `Book ${selectedRide.name}`}
-              </Text>
+              <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+                <Text style={s.bookBtnTxt}>
+                  {isBidVisible ? `Bid ${formatCurrency(Math.max(0, bidAmount - discountAmount))}` : `Book ${selectedRide.name}`}
+                </Text>
+                {discountAmount > 0 && (
+                  <View style={s.btnDiscountPill}>
+                    <Text style={s.btnDiscountPillTxt}>-{formatCurrency(discountAmount)}</Text>
+                  </View>
+                )}
+              </View>
             )}
           </TouchableOpacity>
         </View>
@@ -786,6 +1018,132 @@ export default function BookRideScreen() {
           >
             <Text style={s.confirmBtnTxt}>Confirm</Text>
           </TouchableOpacity>
+        </View>
+      </Modal>
+
+      {/* Promo Code Modal */}
+      <Modal
+        isVisible={isPromoModalVisible}
+        onBackdropPress={() => setIsPromoModalVisible(false)}
+        onBackButtonPress={() => setIsPromoModalVisible(false)}
+        style={s.promoModal}
+        avoidKeyboard
+      >
+        <View style={[s.promoModalContent, { backgroundColor: C.background }]}>
+          <View style={s.promoModalHeader}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+              <MaterialCommunityIcons name="ticket-percent" size={24} color={Colors.brand.secondary} />
+              <Text style={[s.promoModalTitle, { color: C.text }]}>Promotions & Coupons</Text>
+            </View>
+            <TouchableOpacity onPress={() => setIsPromoModalVisible(false)} style={s.promoCloseBtn}>
+              <Ionicons name="close" size={22} color={C.textSecondary} />
+            </TouchableOpacity>
+          </View>
+
+          {/* Promo Input Box */}
+          <View style={[s.promoInputWrapper, { backgroundColor: C.surface, borderColor: promoError ? '#EF4444' : C.border }]}>
+            <TextInput
+              value={promoInputCode}
+              onChangeText={(text) => {
+                setPromoInputCode(text.toUpperCase());
+                if (promoError) setPromoError(null);
+              }}
+              placeholder="Enter Promo Code"
+              placeholderTextColor={C.textMuted}
+              autoCapitalize="characters"
+              autoCorrect={false}
+              style={[s.promoTextInput, { color: C.text }]}
+            />
+            <TouchableOpacity
+              style={[s.applyCodeBtn, { backgroundColor: Colors.brand.secondary, opacity: isValidatingPromo ? 0.7 : 1 }]}
+              onPress={() => handleApplyCouponCode()}
+              disabled={isValidatingPromo}
+            >
+              {isValidatingPromo ? (
+                <ActivityIndicator size="small" color="#fff" />
+              ) : (
+                <Text style={s.applyCodeBtnTxt}>Apply</Text>
+              )}
+            </TouchableOpacity>
+          </View>
+
+          {promoError ? (
+            <View style={s.promoErrorRow}>
+              <Ionicons name="alert-circle" size={16} color="#EF4444" />
+              <Text style={s.promoErrorTxt}>{promoError}</Text>
+            </View>
+          ) : null}
+
+          {/* Available Coupons List */}
+          <Text style={[s.availableCouponsLabel, { color: C.textSecondary }]}>Available Offers</Text>
+          <ScrollView style={s.couponsListScroll} showsVerticalScrollIndicator={false}>
+            {availableCoupons.length === 0 ? (
+              <View style={s.emptyCouponsWrap}>
+                <Ionicons name="gift-outline" size={36} color={C.textMuted} />
+                <Text style={[s.emptyCouponsTxt, { color: C.textMuted }]}>No active coupons at this time.</Text>
+              </View>
+            ) : (
+              availableCoupons.map((coupon) => {
+                const isSelected = appliedCoupon?.id === coupon.id;
+                const discountDisplay = coupon.discount_type === 'percentage' 
+                  ? `${coupon.discount_percentage}% OFF` 
+                  : `₦${(coupon.discount_amount || 0).toLocaleString()} OFF`;
+
+                return (
+                  <View 
+                    key={coupon.id} 
+                    style={[
+                      s.couponCard, 
+                      { 
+                        backgroundColor: coupon.bg_color || (isDark ? '#1E293B' : '#F1F5F9'), 
+                        borderColor: isSelected ? Colors.brand.secondary : 'transparent',
+                        borderWidth: isSelected ? 2 : 1
+                      }
+                    ]}
+                  >
+                    <View style={s.couponCardLeft}>
+                      <View style={s.couponCodeBadge}>
+                        <Text style={s.couponCodeText}>{coupon.code}</Text>
+                      </View>
+                      <Text style={[s.couponTitle, { color: coupon.text_color || (isDark ? '#fff' : '#0F172A') }]}>
+                        {coupon.title || discountDisplay}
+                      </Text>
+                      {coupon.description ? (
+                        <Text style={[s.couponDesc, { color: (coupon.text_color || (isDark ? '#fff' : '#0F172A')) + 'CC' }]}>
+                          {coupon.description}
+                        </Text>
+                      ) : null}
+                      {coupon.min_ride_fare ? (
+                        <Text style={[s.couponMinFare, { color: (coupon.text_color || (isDark ? '#fff' : '#0F172A')) + '99' }]}>
+                          Min. fare: {formatCurrency(coupon.min_ride_fare)}
+                        </Text>
+                      ) : null}
+                    </View>
+
+                    <View style={s.couponCardRight}>
+                      <TouchableOpacity
+                        style={[
+                          s.couponApplyActionBtn,
+                          { 
+                            backgroundColor: isSelected ? '#10B981' : Colors.brand.secondary 
+                          }
+                        ]}
+                        onPress={() => {
+                          if (isSelected) {
+                            handleRemoveCoupon();
+                          } else {
+                            handleApplyCouponCode(coupon.code);
+                          }
+                        }}
+                      >
+                        <Text style={s.couponApplyActionTxt}>{isSelected ? 'Applied' : 'Use'}</Text>
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+                );
+              })
+            )}
+          </ScrollView>
         </View>
       </Modal>
 
@@ -1191,5 +1549,185 @@ const s = StyleSheet.create({
     color: '#fff',
     fontSize: 16,
     fontWeight: '700',
+  },
+  /* Promo Section Styles */
+  appliedPromoCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    borderRadius: 16,
+    borderWidth: 1.5,
+    marginBottom: 10,
+  },
+  promoIconBadge: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  appliedCodeTxt: {
+    fontSize: 15,
+    fontWeight: '800',
+    letterSpacing: 0.5,
+  },
+  appliedActiveBadge: {
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 6,
+  },
+  appliedDiscTxt: {
+    fontSize: 12,
+    fontWeight: '600',
+    marginTop: 2,
+  },
+  removePromoBtn: {
+    padding: 4,
+  },
+  btnDiscountPill: {
+    backgroundColor: '#10B981',
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 10,
+  },
+  btnDiscountPillTxt: {
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: '800',
+  },
+  /* Promo Modal */
+  promoModal: {
+    margin: 0,
+    justifyContent: 'flex-end',
+  },
+  promoModalContent: {
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
+    padding: 24,
+    maxHeight: '80%',
+  },
+  promoModalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 20,
+  },
+  promoModalTitle: {
+    fontSize: 18,
+    fontWeight: '800',
+  },
+  promoCloseBtn: {
+    padding: 4,
+  },
+  promoInputWrapper: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderRadius: 16,
+    borderWidth: 1.5,
+    paddingHorizontal: 14,
+    paddingVertical: 6,
+  },
+  promoTextInput: {
+    flex: 1,
+    fontSize: 15,
+    fontWeight: '700',
+    paddingVertical: 8,
+  },
+  applyCodeBtn: {
+    paddingHorizontal: 18,
+    paddingVertical: 10,
+    borderRadius: 12,
+  },
+  applyCodeBtnTxt: {
+    color: '#fff',
+    fontWeight: '800',
+    fontSize: 14,
+  },
+  promoErrorRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: 8,
+    paddingHorizontal: 4,
+  },
+  promoErrorTxt: {
+    color: '#EF4444',
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  availableCouponsLabel: {
+    fontSize: 14,
+    fontWeight: '700',
+    marginTop: 20,
+    marginBottom: 12,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  couponsListScroll: {
+    maxHeight: 280,
+  },
+  emptyCouponsWrap: {
+    alignItems: 'center',
+    paddingVertical: 32,
+    gap: 8,
+  },
+  emptyCouponsTxt: {
+    fontSize: 14,
+    fontWeight: '500',
+  },
+  couponCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    padding: 16,
+    borderRadius: 18,
+    marginBottom: 12,
+  },
+  couponCardLeft: {
+    flex: 1,
+    paddingRight: 12,
+  },
+  couponCodeBadge: {
+    alignSelf: 'flex-start',
+    backgroundColor: 'rgba(255,255,255,0.25)',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 8,
+    marginBottom: 6,
+  },
+  couponCodeText: {
+    fontSize: 12,
+    fontWeight: '900',
+    letterSpacing: 1,
+    color: '#fff',
+  },
+  couponTitle: {
+    fontSize: 15,
+    fontWeight: '800',
+    marginBottom: 4,
+  },
+  couponDesc: {
+    fontSize: 12,
+    fontWeight: '500',
+    marginBottom: 4,
+  },
+  couponMinFare: {
+    fontSize: 11,
+    fontWeight: '600',
+  },
+  couponCardRight: {
+    alignItems: 'center',
+  },
+  couponApplyActionBtn: {
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 12,
+  },
+  couponApplyActionTxt: {
+    color: '#fff',
+    fontWeight: '800',
+    fontSize: 13,
   },
 });
