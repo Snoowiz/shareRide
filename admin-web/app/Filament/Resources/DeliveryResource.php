@@ -115,7 +115,7 @@ class DeliveryResource extends Resource
     public static function form(Schema $schema): Schema
     {
         return $schema->components([
-            \Filament\Forms\Components\Section::make('Delivery Details')
+            \Filament\Schemas\Components\Section::make('Delivery Details')
                 ->schema([
                     \Filament\Forms\Components\TextInput::make('id')->label('Delivery ID'),
                     \Filament\Forms\Components\TextInput::make('sender.first_name')->label('Sender')->formatStateUsing(fn($record) => $record->sender?->full_name ?? 'N/A'),
@@ -128,7 +128,7 @@ class DeliveryResource extends Resource
                     \Filament\Forms\Components\TextInput::make('payment_method')->label('Payment Method'),
                     \Filament\Forms\Components\TextInput::make('payment_status')->label('Payment Status'),
                 ])->columns(2),
-            \Filament\Forms\Components\Section::make('Locations & Contact')
+            \Filament\Schemas\Components\Section::make('Locations & Contact')
                 ->schema([
                     \Filament\Forms\Components\TextInput::make('pickup_location_name')->label('Pickup Location')->columnSpanFull(),
                     \Filament\Forms\Components\TextInput::make('dropoff_location_name')->label('Dropoff Location')->columnSpanFull(),

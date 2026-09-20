@@ -185,7 +185,7 @@ class RideResource extends Resource
     public static function form(Schema $schema): Schema
     {
         return $schema->components([
-            \Filament\Forms\Components\Section::make('Ride Details')
+            \Filament\Schemas\Components\Section::make('Ride Details')
                 ->schema([
                     \Filament\Forms\Components\TextInput::make('id')->label('Ride ID'),
                     \Filament\Forms\Components\TextInput::make('rider.first_name')->label('Rider')->formatStateUsing(fn($record) => $record->rider?->full_name ?? 'N/A'),
@@ -198,7 +198,7 @@ class RideResource extends Resource
                     \Filament\Forms\Components\TextInput::make('payment_method')->label('Payment Method'),
                     \Filament\Forms\Components\TextInput::make('payment_status')->label('Payment Status'),
                 ])->columns(2),
-            \Filament\Forms\Components\Section::make('Locations')
+            \Filament\Schemas\Components\Section::make('Locations')
                 ->schema([
                     \Filament\Forms\Components\TextInput::make('pickup_location_name')->label('Pickup Location')->columnSpanFull(),
                     \Filament\Forms\Components\TextInput::make('dropoff_location_name')->label('Dropoff Location')->columnSpanFull(),

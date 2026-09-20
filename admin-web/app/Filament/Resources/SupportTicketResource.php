@@ -71,7 +71,7 @@ class SupportTicketResource extends Resource
     public static function form(Schema $schema): Schema
     {
         return $schema->components([
-            \Filament\Forms\Components\Section::make('Ticket Details')
+            \Filament\Schemas\Components\Section::make('Ticket Details')
                 ->schema([
                     \Filament\Forms\Components\TextInput::make('id')->label('Ticket ID'),
                     \Filament\Forms\Components\TextInput::make('user.first_name')->label('User')->formatStateUsing(fn($record) => $record->user?->full_name ?? 'N/A'),

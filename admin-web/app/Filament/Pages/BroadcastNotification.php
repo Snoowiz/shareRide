@@ -12,6 +12,7 @@ use Filament\Forms\Concerns\InteractsWithForms;
 use Filament\Forms\Contracts\HasForms;
 use Filament\Notifications\Notification as FilamentNotification;
 use Filament\Pages\Page;
+use Filament\Schemas\Components\Section;
 use Filament\Schemas\Schema;
 use Illuminate\Support\Str;
 
@@ -44,7 +45,7 @@ class BroadcastNotification extends Page implements HasForms
     {
         return $schema
             ->components([
-                Forms\Components\Section::make('Compose Broadcast')
+                Section::make('Compose Broadcast')
                     ->schema([
                         Forms\Components\Select::make('target')
                             ->label('Target Audience')
@@ -85,7 +86,7 @@ class BroadcastNotification extends Page implements HasForms
                             ->helperText('The screen to open when tapped on mobile.'),
                     ]),
 
-                Forms\Components\Section::make('Transactional Email Delivery')
+                Section::make('Transactional Email Delivery')
                     ->description('Deliver this message directly to user inboxes using the configured SMTP server.')
                     ->icon('heroicon-o-envelope')
                     ->schema([
