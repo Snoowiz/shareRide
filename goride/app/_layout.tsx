@@ -169,7 +169,7 @@ function RootLayoutInner() {
 
 function DynamicPaystackWrapper({ children }: { children: React.ReactNode }) {
   const { paymentConfig } = useAppContext();
-  const activePublicKey = paymentConfig.paystackPublicKey || process.env.EXPO_PUBLIC_PAYSTACK_PUBLIC_KEY || '';
+  const activePublicKey = paymentConfig.paystackPublicKey || '';
 
   return (
     <PaystackProvider 

@@ -18,10 +18,22 @@ use Illuminate\Support\Facades\Validator;
 |
 */
 
+use App\Http\Controllers\Api\PaymentController;
 use App\Http\Middleware\VerifyNotificationApiKey;
 
-Route::prefix('v1/notifications')->group(function () {
+/*
+|--------------------------------------------------------------------------
+| GoRide Unified Multi-Gateway Payment API Routes
+|--------------------------------------------------------------------------
+*/
+Route::prefix('v1/payments')->group(function () {
+    Route::get('/config', [PaymentController::class, 'config']);
+    Route::post('/initialize', [PaymentController::class, 'initialize']);
+    Route::post('/verify', [PaymentController::class, 'verify']);
+    Route::post('/webhook/{gateway}', [PaymentController::class, 'webhook']);
+});
 
+Route::prefix('v1/notifications')->group(function () {
     // Health check and diagnostic status (Public status check)
     Route::get('/health', function () {
         $smtpConfig = NotificationService::configureSmtp();

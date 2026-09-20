@@ -12,10 +12,9 @@ import { supabase } from '@/lib/supabase';
 import { usePaystack } from 'react-native-paystack-webview';
 import LottieView from 'lottie-react-native';
 import { useEffect } from 'react';
+import { initializePayment, openFlutterwaveCheckout, verifyPayment } from '@/lib/paymentService';
 
 const { width } = Dimensions.get('window');
-const PAYSTACK_PUBLIC_KEY = process.env.EXPO_PUBLIC_PAYSTACK_PUBLIC_KEY || '';
-const SUPABASE_URL = process.env.EXPO_PUBLIC_SUPABASE_URL || '';
 const COMMISSION_RATE = 0.15;
 
 interface PaymentSettlementModalProps {
@@ -27,7 +26,7 @@ interface PaymentSettlementModalProps {
   driverEmail: string;
   driverName: string;
   driverId: string;
-  onSettlementComplete: (method: 'paystack' | 'cash', newBalance: number) => void;
+  onSettlementComplete: (method: 'paystack' | 'flutterwave' | 'cash', newBalance: number) => void;
   onClose: () => void;
 }
 
@@ -48,10 +47,11 @@ export default function PaymentSettlementModal({
   const C = Colors[colorScheme];
 
   const isPaystackEnabled = paymentConfig?.paystackEnabled ?? true;
+  const isFlutterwaveEnabled = paymentConfig?.flutterwaveEnabled ?? false;
   const isCashEnabled = paymentConfig?.enableCashPayments ?? true;
 
   const [processing, setProcessing] = useState(false);
-  const [selectedMethod, setSelectedMethod] = useState<'paystack' | 'cash' | null>(null);
+  const [selectedMethod, setSelectedMethod] = useState<'paystack' | 'flutterwave' | 'cash' | null>(null);
   const [paystackOpen, setPaystackOpen] = useState(false);
   const [showSuccess, setShowSuccess] = useState(false);
   const [successData, setSuccessData] = useState<{ method: string; payout: number; balance: number } | null>(null);
@@ -85,9 +85,6 @@ export default function PaymentSettlementModal({
     setProcessing(true);
     setErrorMsg(null);
     try {
-      const session = await supabase.auth.getSession();
-      const token = session.data.session?.access_token;
-
       // Robustly extract the reference from whatever Paystack returns
       const extractedRef =
         (typeof response?.transactionRef === 'string' ? response.transactionRef : null) ||
@@ -100,38 +97,31 @@ export default function PaymentSettlementModal({
       }
 
       const payload = {
-        reference: extractedRef,
         driver_id: driverId,
         ride_id: rideId || null,
         delivery_id: deliveryId || null,
         fare_amount: fareAmount,
       };
 
-      const res = await fetch(`${SUPABASE_URL}/functions/v1/verify-paystack-payment`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`,
-          'apikey': process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY || '',
-        },
-        body: JSON.stringify(payload),
+      const result = await verifyPayment({
+        gateway: 'paystack',
+        reference: extractedRef,
+        metadata: payload,
       });
 
-      const result = await res.json();
-
       if (result.success) {
+        const newBal = result.settlement?.new_balance ?? (driverWalletBalance + driverPayout);
         setPaystackOpen(false);
         setFailCount(0);
         setSuccessData({
           method: 'Paystack',
-          payout: result.driver_payout,
-          balance: result.new_balance,
+          payout: driverPayout,
+          balance: newBal,
         });
         setShowSuccess(true);
-        // Give animation time, then call back
         setTimeout(() => {
           setShowSuccess(false);
-          onSettlementComplete('paystack', result.new_balance);
+          onSettlementComplete('paystack', newBal);
         }, 2500);
       } else {
         setPaystackOpen(false);
@@ -143,7 +133,7 @@ export default function PaymentSettlementModal({
       setPaystackOpen(false);
       setProcessing(false);
       setFailCount(prev => prev + 1);
-      setErrorMsg('Payment verification error. Please try again or use Handle Cash.');
+      setErrorMsg('Payment verification error. Please try again or use another payment method.');
     }
   };
 
@@ -154,6 +144,79 @@ export default function PaymentSettlementModal({
     setSelectedMethod(null);
     setFailCount(prev => prev + 1);
     setErrorMsg('Payment was cancelled. Please select a payment method to proceed.');
+  };
+
+  // ── Handle Flutterwave Payment Flow ──
+  const handleFlutterwavePayment = async () => {
+    setProcessing(true);
+    setErrorMsg(null);
+
+    try {
+      const initRes = await initializePayment({
+        gateway: 'flutterwave',
+        amount: fareAmount,
+        email: driverEmail || 'driver@goride.ng',
+        name: driverName || 'GoRide Driver',
+        metadata: {
+          driver_id: driverId,
+          ride_id: rideId || null,
+          delivery_id: deliveryId || null,
+          fare_amount: fareAmount,
+        },
+      });
+
+      if (!initRes.success || !initRes.checkout_url) {
+        setProcessing(false);
+        setFailCount(prev => prev + 1);
+        setErrorMsg(initRes.error || 'Could not initialize Flutterwave checkout.');
+        return;
+      }
+
+      const checkoutRes = await openFlutterwaveCheckout(initRes.checkout_url);
+
+      if (!checkoutRes.success) {
+        setProcessing(false);
+        if (!checkoutRes.cancelled) {
+          setFailCount(prev => prev + 1);
+          setErrorMsg(checkoutRes.error || 'Payment was cancelled or could not be completed.');
+        }
+        return;
+      }
+
+      const verifyRes = await verifyPayment({
+        gateway: 'flutterwave',
+        reference: checkoutRes.reference || initRes.reference || '',
+        metadata: {
+          driver_id: driverId,
+          ride_id: rideId || null,
+          delivery_id: deliveryId || null,
+          fare_amount: fareAmount,
+        },
+      });
+
+      if (verifyRes.success) {
+        const newBal = verifyRes.settlement?.new_balance ?? (driverWalletBalance + driverPayout);
+        setFailCount(0);
+        setSuccessData({
+          method: 'Flutterwave',
+          payout: driverPayout,
+          balance: newBal,
+        });
+        setShowSuccess(true);
+        setTimeout(() => {
+          setShowSuccess(false);
+          onSettlementComplete('flutterwave', newBal);
+        }, 2500);
+      } else {
+        setProcessing(false);
+        setFailCount(prev => prev + 1);
+        setErrorMsg(verifyRes.error || 'Flutterwave payment verification failed. Please try again.');
+      }
+    } catch (err: any) {
+      setProcessing(false);
+      setFailCount(prev => prev + 1);
+      setErrorMsg(err.message || 'Flutterwave payment error. Please try again.');
+    }
   };
 
   // ── Handle Cash Handler ──
@@ -357,9 +420,9 @@ export default function PaymentSettlementModal({
                 <MaterialCommunityIcons name="credit-card-outline" size={24} color="#3B82F6" />
               </View>
               <View style={s.optionInfo}>
-                <Text style={[s.optionTitle, { color: C.text }]}>Payment Topup</Text>
+                <Text style={[s.optionTitle, { color: C.text }]}>Paystack</Text>
                 <Text style={[s.optionDesc, { color: C.textMuted }]}>
-                  Pay ₦{fareAmount.toLocaleString()} via Paystack. You receive ₦{driverPayout.toLocaleString()} to wallet.
+                  Pay ₦{fareAmount.toLocaleString()} via Paystack card / transfer. You receive ₦{driverPayout.toLocaleString()} to wallet.
                 </Text>
               </View>
               {selectedMethod === 'paystack' && (
@@ -368,7 +431,36 @@ export default function PaymentSettlementModal({
             </TouchableOpacity>
           )}
 
-          {/* Option 2: Cash */}
+          {/* Option 2: Flutterwave */}
+          {isFlutterwaveEnabled && (
+            <TouchableOpacity
+              style={[
+                s.optionCard,
+                {
+                  backgroundColor: selectedMethod === 'flutterwave' ? '#F5A62310' : C.surface,
+                  borderColor: selectedMethod === 'flutterwave' ? '#F5A623' : C.border,
+                },
+              ]}
+              onPress={() => setSelectedMethod('flutterwave')}
+              activeOpacity={0.8}
+              disabled={processing}
+            >
+              <View style={[s.optionIcon, { backgroundColor: '#F5A62315' }]}>
+                <MaterialCommunityIcons name="credit-card-fast-outline" size={24} color="#F5A623" />
+              </View>
+              <View style={s.optionInfo}>
+                <Text style={[s.optionTitle, { color: C.text }]}>Flutterwave</Text>
+                <Text style={[s.optionDesc, { color: C.textMuted }]}>
+                  Pay ₦{fareAmount.toLocaleString()} via Flutterwave card / bank. You receive ₦{driverPayout.toLocaleString()} to wallet.
+                </Text>
+              </View>
+              {selectedMethod === 'flutterwave' && (
+                <Ionicons name="checkmark-circle" size={24} color="#F5A623" />
+              )}
+            </TouchableOpacity>
+          )}
+
+          {/* Option 3: Cash */}
           {isCashEnabled && (
             <TouchableOpacity
               style={[
@@ -440,6 +532,8 @@ export default function PaymentSettlementModal({
                   onSuccess: handlePaystackSuccess,
                   onCancel: handlePaystackCancel,
                 });
+              } else if (selectedMethod === 'flutterwave') {
+                handleFlutterwavePayment();
               } else if (selectedMethod === 'cash') {
                 handleCashSettlement();
               }
@@ -452,10 +546,12 @@ export default function PaymentSettlementModal({
             ) : (
               <Text style={s.actionBtnTxt}>
                 {selectedMethod === 'paystack'
-                  ? `Pay ₦${fareAmount.toLocaleString()}`
-                  : selectedMethod === 'cash'
-                    ? 'Confirm Cash Payment'
-                    : 'Select Payment Method'}
+                  ? `Pay ₦${fareAmount.toLocaleString()} with Paystack`
+                  : selectedMethod === 'flutterwave'
+                    ? `Pay ₦${fareAmount.toLocaleString()} with Flutterwave`
+                    : selectedMethod === 'cash'
+                      ? 'Confirm Cash Payment'
+                      : 'Select Payment Method'}
               </Text>
             )}
           </TouchableOpacity>

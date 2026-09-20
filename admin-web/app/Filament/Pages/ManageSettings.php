@@ -29,13 +29,26 @@ class ManageSettings extends Page implements HasForms
 
     public function mount(): void
     {
-        $settings = Setting::all()->pluck('value', 'key')->toArray();
+        try {
+            $settings = Setting::all()->pluck('value', 'key')->toArray();
+        } catch (\Throwable $e) {
+            \Illuminate\Support\Facades\Log::warning('ManageSettings::mount failed to load settings: ' . $e->getMessage());
+            $settings = [];
+        }
 
         $defaults = [
             'paystack_enabled' => true,
             'paystack_mode' => 'test',
             'paystack_currency' => 'NGN',
-            'paystack_public_key' => env('EXPO_PUBLIC_PAYSTACK_PUBLIC_KEY', ''),
+            'paystack_public_key' => '',
+            'paystack_secret_key' => '',
+            'flutterwave_enabled' => false,
+            'flutterwave_mode' => 'test',
+            'flutterwave_public_key' => '',
+            'flutterwave_secret_key' => '',
+            'flutterwave_encryption_key' => '',
+            'flutterwave_webhook_hash' => '',
+            'flutterwave_currency' => 'NGN',
             'enable_cash_payments' => true,
             'enable_wallet_payments' => true,
             'min_wallet_topup' => 500,
@@ -151,6 +164,62 @@ class ManageSettings extends Page implements HasForms
                                             ->placeholder('payments@goride.app')
                                             ->email()
                                             ->helperText('Displayed on Paystack payment receipts.'),
+                                    ]),
+
+                                \Filament\Schemas\Components\Section::make('Flutterwave Gateway')
+                                    ->description('Configure Flutterwave for card, mobile money, and USSD payments across Africa and internationally.')
+                                    ->icon('heroicon-o-credit-card')
+                                    ->columns(2)
+                                    ->schema([
+                                        Forms\Components\Toggle::make('flutterwave_enabled')
+                                            ->label('Enable Flutterwave Gateway')
+                                            ->helperText('Enable or disable Flutterwave payments across the mobile app.')
+                                            ->default(false),
+                                        Forms\Components\Select::make('flutterwave_mode')
+                                            ->label('Environment Mode')
+                                            ->options([
+                                                'test' => 'Test Mode (Sandbox)',
+                                                'live' => 'Live Mode (Production)',
+                                            ])
+                                            ->default('test')
+                                            ->required(),
+                                        Forms\Components\TextInput::make('flutterwave_public_key')
+                                            ->label('Flutterwave Public Key')
+                                            ->placeholder('FLWPUBK_TEST-... or FLWPUBK-...')
+                                            ->helperText('Used by the mobile app to initialize Flutterwave hosted checkout.')
+                                            ->columnSpan(1),
+                                        Forms\Components\TextInput::make('flutterwave_secret_key')
+                                            ->label('Flutterwave Secret Key')
+                                            ->placeholder('FLWSECK_TEST-... or FLWSECK-...')
+                                            ->password()
+                                            ->revealable()
+                                            ->helperText('Used by the backend to verify transactions. Kept strictly private.')
+                                            ->columnSpan(1),
+                                        Forms\Components\TextInput::make('flutterwave_encryption_key')
+                                            ->label('Flutterwave Encryption Key')
+                                            ->placeholder('FLWSECK_...')
+                                            ->password()
+                                            ->revealable()
+                                            ->helperText('Optional encryption key for card tokenization / direct charges.')
+                                            ->columnSpan(1),
+                                        Forms\Components\TextInput::make('flutterwave_webhook_hash')
+                                            ->label('Secret Webhook Hash')
+                                            ->placeholder('Your secret hash for verif-hash validation')
+                                            ->password()
+                                            ->revealable()
+                                            ->helperText('Secret hash configured in Flutterwave Webhooks dashboard for signature verification.')
+                                            ->columnSpan(1),
+                                        Forms\Components\Select::make('flutterwave_currency')
+                                            ->label('Transaction Currency')
+                                            ->options([
+                                                'NGN' => 'Nigerian Naira (NGN ₦)',
+                                                'USD' => 'US Dollar (USD $)',
+                                                'GHS' => 'Ghanaian Cedi (GHS ₵)',
+                                                'KES' => 'Kenyan Shilling (KES KSh)',
+                                                'ZAR' => 'South African Rand (ZAR R)',
+                                                'RWF' => 'Rwandan Franc (RWF RF)',
+                                            ])
+                                            ->default('NGN'),
                                     ]),
 
                                 \Filament\Schemas\Components\Section::make('Cash & Wallet Operations')
@@ -270,6 +339,10 @@ class ManageSettings extends Page implements HasForms
             );
         }
 
+        // Bust payment gateway caches so new credentials immediately take effect
+        \Illuminate\Support\Facades\Cache::forget('paystack_gateway_settings');
+        \Illuminate\Support\Facades\Cache::forget('flutterwave_gateway_settings');
+
         Notification::make()
             ->title('Settings updated successfully')
             ->success()
@@ -279,6 +352,56 @@ class ManageSettings extends Page implements HasForms
     protected function getHeaderActions(): array
     {
         return [
+            Action::make('testPaystack')
+                ->label('Test Paystack')
+                ->icon('heroicon-o-banknotes')
+                ->color('success')
+                ->action(function () {
+                    // Flush cache to test with latest saved settings
+                    \Illuminate\Support\Facades\Cache::forget('paystack_gateway_settings');
+                    $gateway = new \App\Services\Payment\PaystackGateway();
+                    $res = $gateway->testConnection();
+
+                    if ($res['success']) {
+                        Notification::make()
+                            ->title('Paystack Connection Successful!')
+                            ->body($res['message'])
+                            ->success()
+                            ->send();
+                    } else {
+                        Notification::make()
+                            ->title('Paystack Test Failed')
+                            ->body($res['message'])
+                            ->danger()
+                            ->send();
+                    }
+                }),
+
+            Action::make('testFlutterwave')
+                ->label('Test Flutterwave')
+                ->icon('heroicon-o-credit-card')
+                ->color('warning')
+                ->action(function () {
+                    // Flush cache to test with latest saved settings
+                    \Illuminate\Support\Facades\Cache::forget('flutterwave_gateway_settings');
+                    $gateway = new \App\Services\Payment\FlutterwaveGateway();
+                    $res = $gateway->testConnection();
+
+                    if ($res['success']) {
+                        Notification::make()
+                            ->title('Flutterwave Connection Successful!')
+                            ->body($res['message'])
+                            ->success()
+                            ->send();
+                    } else {
+                        Notification::make()
+                            ->title('Flutterwave Test Failed')
+                            ->body($res['message'])
+                            ->danger()
+                            ->send();
+                    }
+                }),
+
             Action::make('testSmtp')
                 ->label('Test SMTP Connection')
                 ->icon('heroicon-o-paper-airplane')

@@ -12,6 +12,10 @@ export interface PaymentGatewayConfig {
   paystackMode: 'test' | 'live';
   paystackPublicKey: string;
   paystackCurrency: string;
+  flutterwaveEnabled: boolean;
+  flutterwaveMode: 'test' | 'live';
+  flutterwavePublicKey: string;
+  flutterwaveCurrency: string;
   enableCashPayments: boolean;
   enableWalletPayments: boolean;
   minWalletTopup: number;
@@ -110,15 +114,19 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   }, [authUser]);
 
   const colorScheme: 'light' | 'dark' =
-    themeMode === 'system' ? systemScheme : themeMode;
+    themeMode === 'system' ? (systemScheme === 'dark' ? 'dark' : 'light') : themeMode;
 
   const userRole: UserRole = authUser?.role === 'driver' ? 'driver' : 'rider';
 
   const [paymentConfig, setPaymentConfig] = useState<PaymentGatewayConfig>({
     paystackEnabled: true,
     paystackMode: 'test',
-    paystackPublicKey: process.env.EXPO_PUBLIC_PAYSTACK_PUBLIC_KEY || '',
+    paystackPublicKey: '',
     paystackCurrency: 'NGN',
+    flutterwaveEnabled: false,
+    flutterwaveMode: 'test',
+    flutterwavePublicKey: '',
+    flutterwaveCurrency: 'NGN',
     enableCashPayments: true,
     enableWalletPayments: true,
     minWalletTopup: 500,

@@ -11,6 +11,10 @@ export interface AppSettings {
   paystack_mode: 'test' | 'live';
   paystack_public_key: string;
   paystack_currency: string;
+  flutterwave_enabled: boolean;
+  flutterwave_mode: 'test' | 'live';
+  flutterwave_public_key: string;
+  flutterwave_currency: string;
   enable_cash_payments: boolean;
   enable_wallet_payments: boolean;
   min_wallet_topup: number;
@@ -28,8 +32,12 @@ const defaultSettings: AppSettings = {
   maintenance_mode: false,
   paystack_enabled: true,
   paystack_mode: 'test',
-  paystack_public_key: process.env.EXPO_PUBLIC_PAYSTACK_PUBLIC_KEY || '',
+  paystack_public_key: '',
   paystack_currency: 'NGN',
+  flutterwave_enabled: false,
+  flutterwave_mode: 'test',
+  flutterwave_public_key: '',
+  flutterwave_currency: 'NGN',
   enable_cash_payments: true,
   enable_wallet_payments: true,
   min_wallet_topup: 500,
@@ -71,7 +79,7 @@ export const getAppSettings = async (forceRefresh = false): Promise<AppSettings>
         // Coerce types based on keys
         if (['search_radius_km', 'base_fare_car', 'base_fare_bike', 'platform_fee_percentage', 'min_wallet_topup', 'min_driver_withdrawal'].includes(setting.key)) {
            settingsMap[setting.key] = parseFloat(parsedValue);
-        } else if (['maintenance_mode', 'paystack_enabled', 'enable_cash_payments', 'enable_wallet_payments'].includes(setting.key)) {
+        } else if (['maintenance_mode', 'paystack_enabled', 'flutterwave_enabled', 'enable_cash_payments', 'enable_wallet_payments'].includes(setting.key)) {
            settingsMap[setting.key] = parsedValue === true || parsedValue === 'true';
         } else {
            settingsMap[setting.key] = parsedValue;
@@ -90,15 +98,19 @@ export const getAppSettings = async (forceRefresh = false): Promise<AppSettings>
 
 /**
  * Returns the live resolved payment gateway configuration,
- * dynamically prioritized from Supabase settings with safe env fallback.
+ * dynamically prioritized from Supabase settings with safe fallbacks.
  */
 export const getPaymentGatewayConfig = async (forceRefresh = false) => {
   const settings = await getAppSettings(forceRefresh);
   return {
     paystackEnabled: settings.paystack_enabled ?? true,
     paystackMode: (settings.paystack_mode || 'test') as 'test' | 'live',
-    paystackPublicKey: settings.paystack_public_key || process.env.EXPO_PUBLIC_PAYSTACK_PUBLIC_KEY || '',
+    paystackPublicKey: settings.paystack_public_key || '',
     paystackCurrency: settings.paystack_currency || 'NGN',
+    flutterwaveEnabled: settings.flutterwave_enabled ?? false,
+    flutterwaveMode: (settings.flutterwave_mode || 'test') as 'test' | 'live',
+    flutterwavePublicKey: settings.flutterwave_public_key || '',
+    flutterwaveCurrency: settings.flutterwave_currency || 'NGN',
     enableCashPayments: settings.enable_cash_payments ?? true,
     enableWalletPayments: settings.enable_wallet_payments ?? true,
     minWalletTopup: settings.min_wallet_topup ?? 500,
