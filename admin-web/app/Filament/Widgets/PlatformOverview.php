@@ -15,38 +15,63 @@ class PlatformOverview extends BaseWidget
 {
     protected static ?int $sort = 1;
     protected int | string | array $columnSpan = 'full';
-    protected ?string $pollingInterval = '30s';
+    protected ?string $pollingInterval = '60s';
 
     protected function getStats(): array
     {
-        $data = cache()->remember('admin_platform_overview_stats', 30, function () {
-            $activeRides = Ride::whereIn('status', ['searching', 'accepted', 'ongoing'])->count();
-            $activeDeliveries = Delivery::whereIn('status', ['searching', 'accepted', 'picked_up', 'in_transit'])->count();
-            $onlineDrivers = AvailableDriver::where('is_online', true)->count();
-            $pendingVerifications = DriverProfile::where('verification_status', 'pending')->count();
-            $pendingWithdrawals = WithdrawalRequest::where('status', 'pending')->count();
-            $totalRiders = Profile::where('role', 'user')->count();
-            $totalDrivers = Profile::where('role', 'driver')->count();
+        $defaults = [
+            'activeRides' => 0,
+            'activeDeliveries' => 0,
+            'onlineDrivers' => 0,
+            'pendingVerifications' => 0,
+            'pendingWithdrawals' => 0,
+            'totalRiders' => 0,
+            'totalDrivers' => 0,
+            'todayRevenue' => 0,
+            'todayDeliveryRevenue' => 0,
+        ];
 
-            $todayRevenue = Ride::where('status', 'completed')
-                ->whereDate('updated_at', today())
-                ->sum('commission_amount');
-            $todayDeliveryRevenue = Delivery::where('status', 'delivered')
-                ->whereDate('delivered_at', today())
-                ->sum('commission_amount');
+        try {
+            $data = cache()->remember('admin_platform_overview_stats', 60, function () use ($defaults) {
+                try {
+                    $activeRides = Ride::whereIn('status', ['searching', 'accepted', 'ongoing'])->count();
+                    $activeDeliveries = Delivery::whereIn('status', ['searching', 'accepted', 'picked_up', 'in_transit'])->count();
+                    $onlineDrivers = AvailableDriver::where('is_online', true)->count();
+                    $pendingVerifications = DriverProfile::where('verification_status', 'pending')->count();
+                    $pendingWithdrawals = WithdrawalRequest::where('status', 'pending')->count();
+                    $totalRiders = Profile::where('role', 'user')->count();
+                    $totalDrivers = Profile::where('role', 'driver')->count();
 
-            return compact(
-                'activeRides',
-                'activeDeliveries',
-                'onlineDrivers',
-                'pendingVerifications',
-                'pendingWithdrawals',
-                'totalRiders',
-                'totalDrivers',
-                'todayRevenue',
-                'todayDeliveryRevenue'
-            );
-        });
+                    $todayRevenue = Ride::where('status', 'completed')
+                        ->whereDate('updated_at', today())
+                        ->sum('commission_amount');
+                    $todayDeliveryRevenue = Delivery::where('status', 'delivered')
+                        ->whereDate('delivered_at', today())
+                        ->sum('commission_amount');
+
+                    return compact(
+                        'activeRides',
+                        'activeDeliveries',
+                        'onlineDrivers',
+                        'pendingVerifications',
+                        'pendingWithdrawals',
+                        'totalRiders',
+                        'totalDrivers',
+                        'todayRevenue',
+                        'todayDeliveryRevenue'
+                    );
+                } catch (\Throwable $e) {
+                    \Illuminate\Support\Facades\Log::warning('PlatformOverview DB query failed: ' . $e->getMessage());
+                    return cache()->get('admin_platform_overview_stats_last_known', $defaults);
+                }
+            });
+
+            // Store last known good values
+            cache()->put('admin_platform_overview_stats_last_known', $data, 3600);
+        } catch (\Throwable $e) {
+            \Illuminate\Support\Facades\Log::warning('PlatformOverview cache error: ' . $e->getMessage());
+            $data = cache()->get('admin_platform_overview_stats_last_known', $defaults);
+        }
 
         extract($data);
 
