@@ -288,6 +288,37 @@ export default function VerificationScreen() {
     );
   }
 
+  if (authUser?.verificationStatus === 'approved' || authUser?.verificationStatus === 'verified') {
+    return (
+      <View style={[s.root, { backgroundColor: C.background, paddingTop: insets.top }]}>
+        <View style={s.header}>
+          <TouchableOpacity onPress={() => router.back()} style={s.backBtn}>
+            <Ionicons name="close" size={24} color={C.text} />
+          </TouchableOpacity>
+        </View>
+        <View style={[s.warningContent, { paddingBottom: insets.bottom + 20 }]}>
+          <LottieView
+            source={require('@/assets/lottie/success.json')}
+            autoPlay
+            loop={false}
+            style={{ width: 180, height: 180 }}
+          />
+          <Text style={[s.warningTitle, { color: C.text, marginTop: 12 }]}>Account Verified</Text>
+          <Text style={[s.warningSub, { color: C.textSecondary }]}>
+            Your identity has been verified and your account is in good standing. You can enjoy full access to GoRide.
+          </Text>
+
+          <TouchableOpacity
+            style={[s.actionBtn, { backgroundColor: Colors.brand.primary, width: '100%', marginTop: 24 }]}
+            onPress={() => router.replace('/(user)/(tabs)/profile')}
+          >
+            <Text style={s.actionBtnTxt}>Back to Profile</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    );
+  }
+
   if (authUser?.verificationStatus === 'pending') {
     return (
       <View style={[s.root, { backgroundColor: C.background, paddingTop: insets.top }]}>

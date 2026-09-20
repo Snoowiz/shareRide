@@ -1,6 +1,6 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useCallback } from 'react';
 import {
-  View, Text, StyleSheet, ScrollView,
+  View, Text, StyleSheet, ScrollView, RefreshControl,
   TouchableOpacity, Switch, Animated,
   ActivityIndicator, Dimensions, Image, Modal as RNModal
 } from 'react-native';
@@ -10,7 +10,7 @@ import Modal from 'react-native-modal';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
-import { useRouter } from 'expo-router';
+import { useRouter, useFocusEffect } from 'expo-router';
 import { useAppContext, ThemeMode } from '@/context/AppContext';
 import { useAuth } from '@/context/AuthContext';
 import { supabase } from '@/lib/supabase';
@@ -63,7 +63,7 @@ function SettingsRow({
 export default function DriverProfileScreen() {
   const router = useRouter();
   const { colorScheme, themeMode, setThemeMode, user } = useAppContext();
-  const { authUser, signOut, updateAuthUser, setSelectedRole } = useAuth();
+  const { authUser, signOut, updateAuthUser, setSelectedRole, refreshUser } = useAuth();
   const C = Colors[colorScheme];
   const isDark = colorScheme === 'dark';
   const insets = useSafeAreaInsets();
@@ -71,6 +71,7 @@ export default function DriverProfileScreen() {
   const [isSignOutVisible, setIsSignOutVisible] = useState(false);
   const [isTransitioning, setIsTransitioning] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const [stats, setStats] = useState({ count: 0, earnings: 0, rating: 0 });
   const [alertConfig, setAlertConfig] = useState<{
     visible: boolean;
@@ -89,28 +90,45 @@ export default function DriverProfileScreen() {
   const transitionAnim = useRef(new Animated.Value(0)).current;
 
   // Fetch dynamic stats
-  React.useEffect(() => {
-    const fetchStats = async () => {
-      if (!authUser?.id) return;
-      try {
-        const { data: rides } = await supabase.from('rides').select('fare').eq('driver_id', authUser.id).eq('status', 'completed');
-        const { data: delivs } = await supabase.from('deliveries').select('fare').eq('driver_id', authUser.id).eq('status', 'delivered');
-        const { data: ratings } = await supabase.from('ratings').select('rating').eq('rated_id', authUser.id);
-        
-        const count = (rides?.length || 0) + (delivs?.length || 0);
-        const earnings = [...(rides || []), ...(delivs || [])].reduce((sum, r) => sum + (parseFloat(r.fare) || 0), 0);
-        const avgRating = ratings && ratings.length > 0 ? ratings.reduce((s, r) => s + r.rating, 0) / ratings.length : 0;
-        
-        setStats({ count, earnings, rating: parseFloat(avgRating.toFixed(1)) });
-      } catch (err) {
-        console.warn('Error fetching stats:', err);
-      }
-    };
-    fetchStats();
+  const fetchStats = useCallback(async () => {
+    if (!authUser?.id) return;
+    try {
+      const { data: rides } = await supabase.from('rides').select('fare').eq('driver_id', authUser.id).eq('status', 'completed');
+      const { data: delivs } = await supabase.from('deliveries').select('fare').eq('driver_id', authUser.id).eq('status', 'delivered');
+      const { data: ratings } = await supabase.from('ratings').select('rating').eq('rated_id', authUser.id);
+      
+      const count = (rides?.length || 0) + (delivs?.length || 0);
+      const earnings = [...(rides || []), ...(delivs || [])].reduce((sum, r) => sum + (parseFloat(r.fare) || 0), 0);
+      const avgRating = ratings && ratings.length > 0 ? ratings.reduce((s, r) => s + r.rating, 0) / ratings.length : 0;
+      
+      setStats({ count, earnings, rating: parseFloat(avgRating.toFixed(1)) });
+    } catch (err) {
+      console.warn('Error fetching stats:', err);
+    }
   }, [authUser?.id]);
 
-  const isVerified = authUser?.verificationStatus === 'verified';
-  const isPending = authUser?.verificationStatus === 'pending';
+  // Pull to refresh
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    await Promise.all([refreshUser(), fetchStats()]);
+    setRefreshing(false);
+  }, [refreshUser, fetchStats]);
+
+  // Auto-refresh profile and stats when screen is viewed
+  useFocusEffect(
+    useCallback(() => {
+      refreshUser();
+      fetchStats();
+    }, [refreshUser, fetchStats])
+  );
+
+  const isVerified = Boolean(
+    authUser?.isDriverVerified ||
+    authUser?.verificationStatus === 'approved' ||
+    authUser?.verificationStatus === 'verified'
+  );
+  const isPending = !isVerified && authUser?.verificationStatus === 'pending';
+  const isRejected = !isVerified && authUser?.verificationStatus === 'rejected';
 
   const displayName = authUser ? `${authUser.firstName} ${authUser.lastName}`.trim() : 'Driver';
   const displayEmail = authUser?.email || '';
@@ -205,7 +223,18 @@ export default function DriverProfileScreen() {
 
   return (
     <View style={[s.root, { backgroundColor: C.background }]}>
-      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 32 }}>
+      <ScrollView
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={{ paddingBottom: 32 }}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            tintColor={Colors.driver.primary}
+            colors={[Colors.driver.primary]}
+          />
+        }
+      >
         {/* Profile Header */}
         <LinearGradient
           colors={isDark ? ['#1C2333', '#0D1117'] : ['#F0FFF4', '#E3F2FD']}
@@ -251,15 +280,32 @@ export default function DriverProfileScreen() {
                   <Text style={[s.statusBadgeTxt, { color: Colors.brand.success }]}>Verified Driver</Text>
                 </View>
               ) : isPending ? (
-                <View style={[s.statusBadge, { backgroundColor: Colors.brand.warning + '15', borderColor: Colors.brand.warning + '30', borderWidth: 1 }]}>
+                <TouchableOpacity
+                  activeOpacity={0.8}
+                  onPress={() => router.push('/(driver)/document-registration')}
+                  style={[s.statusBadge, { backgroundColor: Colors.brand.warning + '15', borderColor: Colors.brand.warning + '30', borderWidth: 1 }]}
+                >
                   <Ionicons name="time" size={12} color={Colors.brand.warning} />
                   <Text style={[s.statusBadgeTxt, { color: Colors.brand.warning }]}>Pending Review</Text>
-                </View>
+                </TouchableOpacity>
+              ) : isRejected ? (
+                <TouchableOpacity
+                  activeOpacity={0.8}
+                  onPress={() => router.push('/(driver)/document-registration')}
+                  style={[s.statusBadge, { backgroundColor: '#EF444415', borderColor: '#EF444430', borderWidth: 1 }]}
+                >
+                  <Ionicons name="close-circle" size={12} color="#EF4444" />
+                  <Text style={[s.statusBadgeTxt, { color: '#EF4444' }]}>Verification Rejected</Text>
+                </TouchableOpacity>
               ) : (
-                <View style={[s.statusBadge, { backgroundColor: C.surfaceAlt, borderColor: C.border, borderWidth: 1 }]}>
+                <TouchableOpacity
+                  activeOpacity={0.8}
+                  onPress={() => router.push('/(driver)/document-registration')}
+                  style={[s.statusBadge, { backgroundColor: C.surfaceAlt, borderColor: C.border, borderWidth: 1 }]}
+                >
                   <Ionicons name="alert-circle" size={12} color={C.textMuted} />
                   <Text style={[s.statusBadgeTxt, { color: C.textMuted }]}>Unverified Account</Text>
-                </View>
+                </TouchableOpacity>
               )}
             </View>
           </View>

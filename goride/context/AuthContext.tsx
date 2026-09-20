@@ -131,6 +131,7 @@ interface AuthContextType {
   resetPassword: (email: string) => Promise<{ error: string | null }>;
   updatePassword: (password: string) => Promise<{ error: string | null }>;
   updateAuthUser: (updates: Partial<AuthUser>) => void;
+  refreshUser: () => Promise<void>;
   saveDriverProfile: (data: DriverSignupData) => Promise<{ error: string | null }>;
   driverSignupData: DriverSignupData;
   setDriverSignupData: React.Dispatch<React.SetStateAction<DriverSignupData>>;
@@ -148,8 +149,30 @@ async function fetchProfile(userId: string): Promise<AuthUser | null> {
 
   if (error || !data) return null;
 
-  const dp = data.driver_profiles;
-  const up = data.user_profiles;
+  const dp = Array.isArray(data.driver_profiles) ? data.driver_profiles[0] : data.driver_profiles;
+  const up = Array.isArray(data.user_profiles) ? data.user_profiles[0] : data.user_profiles;
+
+  const isDriverVerified = data.is_driver_verified === true || dp?.verification_status === 'approved' || dp?.verification_status === 'verified';
+  const isUserVerified = up?.verification_status === 'approved' || up?.verification_status === 'verified';
+
+  let verificationStatus = 'unverified';
+  if (data.role === 'driver' || isDriverVerified || dp?.verification_status) {
+    if (isDriverVerified) {
+      verificationStatus = 'approved';
+    } else if (dp?.verification_status === 'pending') {
+      verificationStatus = 'pending';
+    } else if (dp?.verification_status === 'rejected') {
+      verificationStatus = 'rejected';
+    }
+  } else {
+    if (isUserVerified) {
+      verificationStatus = 'approved';
+    } else if (up?.verification_status === 'pending') {
+      verificationStatus = 'pending';
+    } else if (up?.verification_status === 'rejected') {
+      verificationStatus = 'rejected';
+    }
+  }
 
   return {
     id: data.id,
@@ -159,7 +182,7 @@ async function fetchProfile(userId: string): Promise<AuthUser | null> {
     phone: data.phone || '',
     avatar: data.avatar_url,
     role: data.role as AuthRole,
-    isDriverVerified: data.is_driver_verified,
+    isDriverVerified: isDriverVerified,
     hasDriverProfile: !!dp,
     hasUserProfile: !!up,
     
@@ -196,7 +219,7 @@ async function fetchProfile(userId: string): Promise<AuthUser | null> {
     nextOfKinRelationship: dp?.next_of_kin_relationship ?? '',
     
     // Verification
-    verificationStatus: dp?.verification_status || up?.verification_status || 'unverified',
+    verificationStatus: verificationStatus,
   };
 }
 
@@ -346,10 +369,24 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     };
   }, []);
 
-  // ── Single-device session enforcement ──────────────────────────────
-  // Check on app resume if another device has taken over the session
+  const refreshUser = useCallback(async () => {
+    const currentId = session?.user?.id || authUser?.id;
+    if (!currentId) return;
+    try {
+      const profile = await fetchProfile(currentId);
+      if (profile) {
+        profile.email = session?.user?.email || authUser?.email || profile.email;
+        setAuthUser(profile);
+      }
+    } catch (err) {
+      console.warn('refreshUser failed:', err);
+    }
+  }, [session?.user?.id, session?.user?.email, authUser?.id, authUser?.email]);
+
+  // ── Single-device session enforcement & Realtime Profile Sync ─────
+  // Check on app resume if another device has taken over the session, and keep profile fresh
   useEffect(() => {
-    if (status !== 'authenticated' || !authUser?.id || !sessionIdRef.current) return;
+    if (status !== 'authenticated' || !authUser?.id) return;
 
     const checkSessionValidity = async () => {
       if (isSigningOut.current || !sessionIdRef.current) return;
@@ -370,13 +407,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const handleAppState = (nextState: AppStateStatus) => {
       if (nextState === 'active') {
         checkSessionValidity();
+        refreshUser();
       }
     };
     const appStateSub = AppState.addEventListener('change', handleAppState);
 
-    // Also subscribe to realtime changes on this user's profile row
+    // Also subscribe to realtime changes on this user's profile and driver/user profile rows
     const channel = supabase
-      .channel(`session-guard-${authUser.id}`)
+      .channel(`session-and-profile-${authUser.id}`)
       .on('postgres_changes', {
         event: 'UPDATE',
         schema: 'public',
@@ -390,6 +428,23 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             setDisplacedAlert(true);
           }
         }
+        refreshUser();
+      })
+      .on('postgres_changes', {
+        event: '*',
+        schema: 'public',
+        table: 'driver_profiles',
+        filter: `id=eq.${authUser.id}`,
+      }, () => {
+        refreshUser();
+      })
+      .on('postgres_changes', {
+        event: '*',
+        schema: 'public',
+        table: 'user_profiles',
+        filter: `id=eq.${authUser.id}`,
+      }, () => {
+        refreshUser();
       })
       .subscribe();
 
@@ -397,7 +452,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       appStateSub.remove();
       supabase.removeChannel(channel);
     };
-  }, [status, authUser?.id]);
+  }, [status, authUser?.id, refreshUser]);
 
   // ── Auth methods ──
 
@@ -678,7 +733,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         status, session, authUser, selectedRole, setSelectedRole,
         signUpWithEmail, signInWithEmail, signInWithPhone, signUpWithPhone,
         signInWithGoogle, checkUserExists, signOut, resetPassword, updatePassword,
-        updateAuthUser, saveDriverProfile,
+        updateAuthUser, refreshUser, saveDriverProfile,
         driverSignupData, setDriverSignupData,
       }}
     >

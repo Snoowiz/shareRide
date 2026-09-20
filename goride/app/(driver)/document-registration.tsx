@@ -249,6 +249,13 @@ export default function DocumentRegistrationScreen() {
   if (profilePhotoUrl) filledFields++;
   if (ninSlipUrl) filledFields++;
   const progressPercent = Math.round((filledFields / totalFields) * 100);
+  const isVerified = Boolean(
+    authUser?.isDriverVerified ||
+    authUser?.verificationStatus === 'approved' ||
+    authUser?.verificationStatus === 'verified'
+  );
+  const isPending = !isVerified && authUser?.verificationStatus === 'pending';
+  const isRejected = !isVerified && authUser?.verificationStatus === 'rejected';
 
   return (
     <View style={[s.root, { backgroundColor: C.background }]}>
@@ -282,9 +289,29 @@ export default function DocumentRegistrationScreen() {
       >
         <ScrollView contentContainerStyle={s.content} showsVerticalScrollIndicator={false}>
           <View style={s.intro}>
-            <Text style={[s.introTitle, { color: C.text }]}>Identity Verification</Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+              <Text style={[s.introTitle, { color: C.text }]}>Identity Verification</Text>
+              {isVerified ? (
+                <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: Colors.brand.success + '15', borderColor: Colors.brand.success + '30', borderWidth: 1, paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12, gap: 4 }}>
+                  <Ionicons name="shield-checkmark" size={13} color={Colors.brand.success} />
+                  <Text style={{ fontSize: 12, fontWeight: '700', color: Colors.brand.success }}>Approved</Text>
+                </View>
+              ) : isPending ? (
+                <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: Colors.brand.warning + '15', borderColor: Colors.brand.warning + '30', borderWidth: 1, paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12, gap: 4 }}>
+                  <Ionicons name="time" size={13} color={Colors.brand.warning} />
+                  <Text style={{ fontSize: 12, fontWeight: '700', color: Colors.brand.warning }}>Under Review</Text>
+                </View>
+              ) : isRejected ? (
+                <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: '#EF444415', borderColor: '#EF444430', borderWidth: 1, paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12, gap: 4 }}>
+                  <Ionicons name="close-circle" size={13} color="#EF4444" />
+                  <Text style={{ fontSize: 12, fontWeight: '700', color: '#EF4444' }}>Rejected</Text>
+                </View>
+              ) : null}
+            </View>
             <Text style={[s.introSub, { color: C.textSecondary }]}>
-              Ensure all documents are clear and valid. Updates may trigger a re-verification process.
+              {isVerified 
+                ? 'Your driver documents have been approved and verified by the admin.'
+                : 'Ensure all documents are clear and valid. Updates may trigger a re-verification process.'}
             </Text>
           </View>
 
