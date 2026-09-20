@@ -187,9 +187,39 @@ function SendPackageInner() {
             const km = el.distance.value / 1000;
             const mins = el.duration.value / 60;
             pkg.setRouteInfo(km, mins);
+          } else {
+            // Fallback GPS calculation if Google Maps API has billing/rate limits
+            const lat1 = state.senderLocation.latitude;
+            const lon1 = state.senderLocation.longitude;
+            const lat2 = state.receiverLocation.latitude;
+            const lon2 = state.receiverLocation.longitude;
+            const R = 6371;
+            const dLat = (lat2 - lat1) * Math.PI / 180;
+            const dLon = (lon2 - lon1) * Math.PI / 180;
+            const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) + Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLon / 2) * Math.sin(dLon / 2);
+            const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+            const km = Math.max(1, Math.round(R * c * 1.3 * 10) / 10);
+            const mins = Math.max(5, Math.round(km * 2.5));
+            pkg.setRouteInfo(km, mins);
           }
         })
-        .catch(() => { });
+        .catch(() => {
+          // Fallback on network/fetch error
+          if (state.senderLocation && state.receiverLocation) {
+            const lat1 = state.senderLocation.latitude;
+            const lon1 = state.senderLocation.longitude;
+            const lat2 = state.receiverLocation.latitude;
+            const lon2 = state.receiverLocation.longitude;
+            const R = 6371;
+            const dLat = (lat2 - lat1) * Math.PI / 180;
+            const dLon = (lon2 - lon1) * Math.PI / 180;
+            const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) + Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLon / 2) * Math.sin(dLon / 2);
+            const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+            const km = Math.max(1, Math.round(R * c * 1.3 * 10) / 10);
+            const mins = Math.max(5, Math.round(km * 2.5));
+            pkg.setRouteInfo(km, mins);
+          }
+        });
     }
     setStep(3);
   };

@@ -202,30 +202,67 @@ export default function DriverHomeIndex() {
         rider: profilesMap[r.rider_id] || null
       }));
 
-      // 4. Distance Matrix to filter by proximity (6km)
+      // 4. Distance Matrix to filter by proximity (6km) with resilient offline/GPS fallback
       const driverLoc = `${location.coords.latitude},${location.coords.longitude}`;
       const destinations = requestsWithProfiles.map(r => `${r.pickup_lat},${r.pickup_lng}`).join('|');
       const apiKey = process.env.EXPO_PUBLIC_GOOGLE_MAPS_APIKEY;
-      const url = `https://maps.googleapis.com/maps/api/distancematrix/json?origins=${driverLoc}&destinations=${destinations}&key=${apiKey}`;
 
-      const response = await fetch(url);
-      const matrixData = await response.json();
-      if (matrixData.status !== 'OK') throw new Error('Distance Matrix failed');
+      let filtered: any[] = [];
 
-      const filtered = requestsWithProfiles.map((req, index) => {
-        const element = matrixData.rows[0].elements[index];
-        if (element.status !== 'OK') return null;
-        const distanceInKm = element.distance.value / 1000;
-        if (distanceInKm <= 6) {
-          return {
-            ...req,
-            driver_distance: element.distance.text,
-            driver_duration: element.duration.text,
-            proximity_km: distanceInKm,
-          };
+      try {
+        const url = `https://maps.googleapis.com/maps/api/distancematrix/json?origins=${driverLoc}&destinations=${destinations}&key=${apiKey}`;
+        const response = await fetch(url);
+        const matrixData = await response.json();
+
+        if (matrixData.status === 'OK' && matrixData.rows?.[0]?.elements) {
+          filtered = requestsWithProfiles.map((req, index) => {
+            const element = matrixData.rows[0].elements[index];
+            if (!element || element.status !== 'OK') return null;
+            const distanceInKm = element.distance.value / 1000;
+            if (distanceInKm <= 6) {
+              return {
+                ...req,
+                driver_distance: element.distance.text,
+                driver_duration: element.duration.text,
+                proximity_km: distanceInKm,
+              };
+            }
+            return null;
+          }).filter(r => r !== null);
+        } else {
+          throw new Error(matrixData.error_message || `Distance Matrix returned ${matrixData.status}`);
         }
-        return null;
-      }).filter(r => r !== null);
+      } catch (matrixErr: any) {
+        // Fallback to Haversine GPS formula if Google Maps API is down, rate-limited, or billing suspended
+        filtered = requestsWithProfiles.map((req) => {
+          const lat1 = location.coords.latitude;
+          const lon1 = location.coords.longitude;
+          const lat2 = parseFloat(req.pickup_lat);
+          const lon2 = parseFloat(req.pickup_lng);
+          if (isNaN(lat2) || isNaN(lon2)) return null;
+
+          const R = 6371; // Earth radius in km
+          const dLat = (lat2 - lat1) * Math.PI / 180;
+          const dLon = (lon2 - lon1) * Math.PI / 180;
+          const a =
+            Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+            Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+            Math.sin(dLon / 2) * Math.sin(dLon / 2);
+          const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+          const distanceInKm = Math.round(R * c * 1.3 * 10) / 10; // 1.3 driving curvature factor
+
+          if (distanceInKm <= 6) {
+            const approxMins = Math.max(2, Math.round(distanceInKm * 2.5));
+            return {
+              ...req,
+              driver_distance: `${distanceInKm} km`,
+              driver_duration: `${approxMins} mins`,
+              proximity_km: distanceInKm,
+            };
+          }
+          return null;
+        }).filter(r => r !== null);
+      }
 
       setAvailableRides(filtered);
       setIsNewRideVisible(filtered.length > 0);
