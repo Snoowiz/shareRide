@@ -3,17 +3,6 @@ import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, Platform, 
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import BottomSheet, { BottomSheetView } from '@gorhom/bottom-sheet';
-// MapView conditionally loaded for native only
-let MapView: any = null;
-let Marker: any = null;
-let PROVIDER_GOOGLE: any = null;
-if (Platform.OS !== 'web') {
-  const Maps = require('react-native-maps');
-  MapView = Maps.default;
-  Marker = Maps.Marker;
-  PROVIDER_GOOGLE = Maps.PROVIDER_GOOGLE;
-}
 import * as Location from 'expo-location';
 import { GooglePlacesAutocomplete } from 'react-native-google-places-autocomplete';
 
@@ -48,9 +37,7 @@ export default function DestinationScreen() {
   const [showPermissionModal, setShowPermissionModal] = useState(false);
   const [permissionChecked, setPermissionChecked] = useState(false);
 
-  const bottomSheetRef = React.useRef<BottomSheet>(null);
   const googleInputRef = React.useRef<any>(null);
-  const snapPoints = React.useMemo(() => ['92%'], []);
 
   useEffect(() => {
     if (authUser?.id) {
@@ -58,7 +45,7 @@ export default function DestinationScreen() {
         .from('saved_places')
         .select('*')
         .eq('user_id', authUser.id)
-        .then(({ data }) => {
+        .then(({ data }: any) => {
           if (data) setSavedPlaces(data);
         });
       
@@ -217,73 +204,23 @@ export default function DestinationScreen() {
     }
   };
 
-  const mapStyle = colorScheme === 'dark' ? [
-    { elementType: "geometry", stylers: [{ color: "#242f3e" }] },
-    { elementType: "labels.text.fill", stylers: [{ color: "#746855" }] },
-    { elementType: "labels.text.stroke", stylers: [{ color: "#242f3e" }] },
-    { featureType: "administrative.locality", elementType: "labels.text.fill", stylers: [{ color: "#d59563" }] },
-    { featureType: "road", elementType: "geometry", stylers: [{ color: "#38414e" }] },
-    { featureType: "road", elementType: "geometry.stroke", stylers: [{ color: "#212a37" }] },
-    { featureType: "road.highway", elementType: "geometry", stylers: [{ color: "#746855" }] },
-    { featureType: "road.highway", elementType: "geometry.stroke", stylers: [{ color: "#1f2835" }] },
-  ] : [];
-
   return (
     <>
-      <View style={s.root}>
-        <View style={[s.mapContainer]}>
-          {Platform.OS === 'web' ? (
-            <View style={[s.mapLoading, { backgroundColor: C.surfaceAlt }]}>
-              <Text style={{ color: C.textMuted }}>Map not supported on Web.</Text>
-            </View>
-          ) : currentLocation && MapView ? (
-            <MapView
-              provider={Platform.OS === 'android' ? PROVIDER_GOOGLE : undefined}
-              style={StyleSheet.absoluteFillObject}
-              customMapStyle={mapStyle}
-              initialRegion={{
-                ...currentLocation,
-                latitudeDelta: 0.05,
-                longitudeDelta: 0.05,
-              }}
-            >
-              <Marker coordinate={currentLocation}>
-                <View style={[s.pinCircle, { backgroundColor: C.tint }]}>
-                  <View style={s.pinInner} />
-                </View>
-              </Marker>
-              {destination && (
-                <Marker coordinate={{ latitude: destination.lat, longitude: destination.lng }}>
-                  <Ionicons name="location" size={32} color={C.tint} />
-                </Marker>
-              )}
-            </MapView>
-          ) : (
-            <View style={[s.mapLoading, { backgroundColor: C.surfaceAlt }]}>
-              <ActivityIndicator size="large" color={C.tint} />
-            </View>
-          )}
+      <View style={[s.root, { backgroundColor: C.background, paddingTop: insets.top }]}>
+        <View style={s.header}>
+          <TouchableOpacity onPress={() => router.back()} style={s.backBtn}>
+            <Ionicons name="chevron-back" size={24} color={C.text} />
+          </TouchableOpacity>
+          <Text style={[s.title, { color: C.text }]}>Destination</Text>
+          <View style={s.backBtn} /> 
         </View>
 
-        <BottomSheet
-          ref={bottomSheetRef}
-          index={0}
-          snapPoints={snapPoints}
-          keyboardBehavior="extend"
-          enablePanDownToClose={false}
-          enableOverDrag={false}
-          handleIndicatorStyle={{ backgroundColor: C.border }}
-          backgroundStyle={{ backgroundColor: C.background }}
+        <ScrollView
+          style={{ flex: 1 }}
+          contentContainerStyle={[s.scrollContent, { paddingBottom: insets.bottom + 90 }]}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
         >
-          <BottomSheetView style={[s.bottomSheetView, { paddingBottom: insets.bottom + 90 }]}>
-          <View style={s.header}>
-            <TouchableOpacity onPress={() => router.back()} style={s.backBtn}>
-              <Ionicons name="chevron-back" size={24} color={C.text} />
-            </TouchableOpacity>
-            <Text style={[s.title, { color: C.text }]}>Destination</Text>
-            <View style={s.backBtn} /> 
-          </View>
-
           <View style={[s.inputsContainer, { backgroundColor: C.surface, borderColor: C.border }]}>
             
             <View style={[s.inputRow, { zIndex: 1000 }]}>
@@ -344,7 +281,6 @@ export default function DestinationScreen() {
                   textInputProps={{
                     placeholderTextColor: C.textSecondary,
                     clearButtonMode: 'always',
-                    onFocus: () => bottomSheetRef.current?.expand(),
                   }}
                   enablePoweredByContainer={false}
                 />
@@ -427,7 +363,6 @@ export default function DestinationScreen() {
                   textInputProps={{
                     placeholderTextColor: C.textMuted,
                     clearButtonMode: 'never',
-                    onFocus: () => bottomSheetRef.current?.expand(),
                   }}
                   enablePoweredByContainer={false}
                 />
@@ -491,8 +426,7 @@ export default function DestinationScreen() {
             )}
           </View>
 
-          </BottomSheetView>
-        </BottomSheet>
+        </ScrollView>
 
         <View style={[s.floatingConfirmWrap, { paddingBottom: insets.bottom + 20, backgroundColor: C.background }]}>
           <TouchableOpacity
@@ -521,20 +455,17 @@ export default function DestinationScreen() {
 
 const s = StyleSheet.create({
   root: { flex: 1 },
-  mapContainer: { flex: 1 },
-  mapLoading: { flex: 1, alignItems: 'center', justifyContent: 'center' },
-  pinCircle: { width: 16, height: 16, borderRadius: 8, alignItems: 'center', justifyContent: 'center', borderWidth: 2, borderColor: '#fff' },
-  pinInner: { width: 6, height: 6, borderRadius: 3, backgroundColor: '#fff' },
   
-  bottomSheetView: {
+  scrollContent: {
     paddingHorizontal: 20,
-    flex: 1,
+    paddingTop: 4,
   },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingVertical: 16,
+    paddingHorizontal: 20,
+    paddingVertical: 12,
   },
   backBtn: {
     width: 40,
