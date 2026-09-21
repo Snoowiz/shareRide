@@ -203,12 +203,27 @@ export default function BookRideScreen() {
       });
 
       if (!error && data && data.length > 0) {
-        setRideTypes(data as DynamicRideType[]);
+        // Sort available ride types to always come first before unavailable ones
+        const sortedData = [...(data as DynamicRideType[])].sort((a, b) => {
+          const aAvail = (a.is_available ?? ((a.available_drivers_count || 0) > 0)) ? 1 : 0;
+          const bAvail = (b.is_available ?? ((b.available_drivers_count || 0) > 0)) ? 1 : 0;
+          if (bAvail !== aAvail) return bAvail - aAvail;
+          return (a.display_order || 0) - (b.display_order || 0);
+        });
+
+        setRideTypes(sortedData);
         setSelectedRide(prev => {
-          const matching = data.find((r: DynamicRideType) => r.id === prev?.id || r.code === prev?.code);
+          // If previous selection is still available, keep it
+          const matching = sortedData.find((r: DynamicRideType) => 
+            (r.id === prev?.id || r.code === prev?.code) && (r.is_available ?? ((r.available_drivers_count || 0) > 0))
+          );
           if (matching) return matching;
-          const firstAvailable = data.find((r: DynamicRideType) => r.is_available);
-          return firstAvailable || data[0];
+
+          // Otherwise auto-select the first available ride type
+          const firstAvailable = sortedData.find((r: DynamicRideType) => 
+            (r.is_available ?? ((r.available_drivers_count || 0) > 0))
+          );
+          return firstAvailable || sortedData[0];
         });
       }
     } catch (err) {
