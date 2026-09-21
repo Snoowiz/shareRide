@@ -14,12 +14,13 @@ class Ride extends Model
     protected $fillable = [
         'id', 'rider_id', 'driver_id', 'pickup_lat', 'pickup_lng', 'pickup_address',
         'destination_lat', 'destination_lng', 'destination_address', 'ride_type',
-        'ride_type_id', 'fare', 'distance_km', 'duration_mins', 'status', 'commission_amount',
+        'ride_type_id', 'estimated_fare', 'fare', 'distance_km', 'duration_mins', 'status', 'commission_amount',
         'driver_payout', 'surge_multiplier', 'scheduled_at', 'is_scheduled',
         'payment_method', 'payment_status', 'is_shared', 'passenger_count',
     ];
 
     protected $casts = [
+        'estimated_fare' => 'decimal:2',
         'fare' => 'decimal:2',
         'distance_km' => 'float',
         'duration_mins' => 'float',

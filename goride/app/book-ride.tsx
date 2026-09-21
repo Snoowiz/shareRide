@@ -124,8 +124,19 @@ export default function BookRideScreen() {
     });
   }, []);
 
+  // Rider Price Adjustment / Bargaining Settings
+  const [adjSettings, setAdjSettings] = useState<{
+    enabled: boolean;
+    max_downward_percent: number;
+    max_upward_percent: number;
+  }>({
+    enabled: true,
+    max_downward_percent: 10,
+    max_upward_percent: 20,
+  });
   const [isBidVisible, setBidVisible] = useState(false);
   const [bidAmount, setBidAmount] = useState<number>(0);
+  const [bidInputText, setBidInputText] = useState<string>('');
 
   const [isSearching, setIsSearching] = useState(false);
   const [isBooking, setIsBooking] = useState(false);
@@ -189,6 +200,39 @@ export default function BookRideScreen() {
       console.warn('Failed to fetch available coupons:', e);
     }
   }, []);
+
+  // Dynamic Admin Price Adjustment Settings Fetcher
+  const fetchPriceAdjustmentSettings = useCallback(async () => {
+    try {
+      const { data, error } = await supabase.rpc('get_price_adjustment_settings');
+      if (!error && data) {
+        setAdjSettings({
+          enabled: Boolean(data.enabled),
+          max_downward_percent: Number(data.max_downward_percent) || 0,
+          max_upward_percent: Number(data.max_upward_percent) || 0,
+        });
+      }
+    } catch (err) {
+      console.warn('Failed to load price adjustment settings:', err);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchPriceAdjustmentSettings();
+
+    const channel = supabase
+      .channel('public-settings-price-adj-sync')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'settings' },
+        () => fetchPriceAdjustmentSettings()
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [fetchPriceAdjustmentSettings]);
 
   useEffect(() => {
     fetchAvailableCoupons();
@@ -261,11 +305,34 @@ export default function BookRideScreen() {
     };
   }, [fetchAvailableRideTypes]);
 
-  const computedFareBeforeDiscount = isBidVisible && bidAmount > 0
+  const platformEstimatedFare = React.useMemo(() => {
+    if (isSharedRide && selectedRide.supports_shared_rides && selectedRide.shared_fare) {
+      return selectedRide.shared_fare;
+    }
+    return selectedRide.calculated_fare ?? Math.round((selectedRide.base_fare + (distanceKm * selectedRide.price_per_km) + (durationMins * selectedRide.price_per_min)) / 50) * 50;
+  }, [isSharedRide, selectedRide, distanceKm, durationMins]);
+
+  const minAllowedFare = React.useMemo(() => {
+    if (!adjSettings.enabled) return platformEstimatedFare;
+    const downPct = Math.min(100, Math.max(0, adjSettings.max_downward_percent));
+    const rawMin = Math.round((platformEstimatedFare * (1.0 - downPct / 100.0)) / 50) * 50;
+    const floorMin = selectedRide.minimum_fare || 0;
+    return Math.max(floorMin, rawMin);
+  }, [platformEstimatedFare, adjSettings, selectedRide]);
+
+  const maxAllowedFare = React.useMemo(() => {
+    if (!adjSettings.enabled) return platformEstimatedFare;
+    const upPct = Math.max(0, adjSettings.max_upward_percent);
+    return Math.round((platformEstimatedFare * (1.0 + upPct / 100.0)) / 50) * 50;
+  }, [platformEstimatedFare, adjSettings]);
+
+  const isBidOutOfRange = isBidVisible && adjSettings.enabled && (
+    !bidAmount || isNaN(Number(bidAmount)) || Number(bidAmount) < minAllowedFare || Number(bidAmount) > maxAllowedFare
+  );
+
+  const computedFareBeforeDiscount = isBidVisible && adjSettings.enabled && bidAmount > 0 && !isBidOutOfRange
     ? bidAmount 
-    : (isSharedRide && selectedRide.supports_shared_rides && selectedRide.shared_fare)
-      ? selectedRide.shared_fare
-      : (selectedRide.calculated_fare ?? Math.round((selectedRide.base_fare + (distanceKm * selectedRide.price_per_km) + (durationMins * selectedRide.price_per_min)) / 50) * 50);
+    : platformEstimatedFare;
 
   useEffect(() => {
     if (appliedCoupon) {
@@ -462,15 +529,35 @@ export default function BookRideScreen() {
   }, [currentLocation]);
 
   useEffect(() => {
-    if (distanceKm > 0 && durationMins > 0) {
-      const baseFare = selectedRide.base_fare ?? 500;
-      const pricePerKm = selectedRide.price_per_km ?? 150;
-      const pricePerMin = selectedRide.price_per_min ?? 30;
-      const calculated = (baseFare + (distanceKm * pricePerKm) + (durationMins * pricePerMin)) * surgeMultiplier;
-      // Round to nearest 50 Naira for clean pricing
-      setBidAmount(Math.round(calculated / 50) * 50);
+    if (platformEstimatedFare > 0) {
+      setBidAmount(prev => {
+        if (!isBidVisible || prev <= 0 || prev < minAllowedFare || prev > maxAllowedFare) {
+          setBidInputText(String(platformEstimatedFare));
+          return platformEstimatedFare;
+        }
+        return prev;
+      });
     }
-  }, [distanceKm, durationMins, selectedRide, surgeMultiplier]);
+  }, [platformEstimatedFare, isBidVisible, minAllowedFare, maxAllowedFare]);
+
+  const handleStepBid = (delta: number) => {
+    const current = Number(bidAmount) || platformEstimatedFare;
+    const next = Math.round((current + delta) / 50) * 50;
+    const clamped = Math.min(maxAllowedFare, Math.max(minAllowedFare, next));
+    setBidAmount(clamped);
+    setBidInputText(String(clamped));
+  };
+
+  const handleBidInputChange = (text: string) => {
+    const cleaned = text.replace(/[^0-9]/g, '');
+    setBidInputText(cleaned);
+    const val = parseInt(cleaned, 10);
+    if (!isNaN(val)) {
+      setBidAmount(val);
+    } else {
+      setBidAmount(0);
+    }
+  };
 
   useEffect(() => {
     if (!currentLocation || !destinationLocation) {
@@ -535,6 +622,21 @@ export default function BookRideScreen() {
         return;
       }
 
+      const hasAdjustedFare = isBidVisible && adjSettings.enabled && bidAmount > 0 && bidAmount !== platformEstimatedFare;
+
+      if (isBidVisible && adjSettings.enabled) {
+        if (isBidOutOfRange) {
+          setAlertConfig({
+            visible: true,
+            title: 'Invalid Proposed Fare',
+            message: `Your proposed fare must be between ${formatCurrency(minAllowedFare)} and ${formatCurrency(maxAllowedFare)}.`,
+            type: 'warning'
+          });
+          setIsBooking(false);
+          return;
+        }
+      }
+
       // Call authoritative backend RPC for race-condition-safe booking & fare validation
       const { data: bookedRide, error: rpcError } = await supabase.rpc('book_ride_request', {
         p_rider_id: authUser.id,
@@ -552,8 +654,8 @@ export default function BookRideScreen() {
         p_is_shared: isSharedRide && selectedRide.supports_shared_rides,
         p_passenger_count: passengerCount,
         p_coupon_id: appliedCoupon ? appliedCoupon.id : null,
-        p_is_bid: isBidVisible && bidAmount > 0,
-        p_bid_amount: isBidVisible && bidAmount > 0 ? bidAmount : null,
+        p_is_bid: hasAdjustedFare,
+        p_bid_amount: hasAdjustedFare ? bidAmount : null,
       });
 
       if (rpcError) {
@@ -624,7 +726,7 @@ export default function BookRideScreen() {
           <MapView
             ref={mapRef}
             provider={Platform.OS === 'android' ? PROVIDER_GOOGLE : undefined}
-            style={StyleSheet.absoluteFillObject}
+            style={StyleSheet.absoluteFill}
             customMapStyle={mapStyle}
             initialRegion={{
               ...currentLocation,
@@ -728,10 +830,29 @@ export default function BookRideScreen() {
           {/* Ride Types */}
           <View style={s.sectionHeader}>
             <Text style={[s.sectionTitle, { color: C.text, marginBottom: 0 }]}>Select Ride Type</Text>
-            {bidAmount > 0 && (
-              <TouchableOpacity style={s.bidToggleBtn} onPress={() => setBidVisible(!isBidVisible)}>
-                <MaterialCommunityIcons name="gavel" size={20} color={Colors.brand.secondary} />
-                <Text style={[s.bidToggleTxt, { color: Colors.brand.secondary }]}>Offer Fare</Text>
+            {adjSettings.enabled && platformEstimatedFare > 0 && (
+              <TouchableOpacity 
+                style={[
+                  s.bidToggleBtn,
+                  isBidVisible && { backgroundColor: Colors.brand.secondary + '25', borderColor: Colors.brand.secondary, borderWidth: 1 }
+                ]} 
+                onPress={() => {
+                  const nextVisible = !isBidVisible;
+                  setBidVisible(nextVisible);
+                  if (nextVisible) {
+                    setBidAmount(platformEstimatedFare);
+                    setBidInputText(String(platformEstimatedFare));
+                  }
+                }}
+              >
+                <MaterialCommunityIcons 
+                  name={isBidVisible ? "close" : "gavel"} 
+                  size={18} 
+                  color={Colors.brand.secondary} 
+                />
+                <Text style={[s.bidToggleTxt, { color: Colors.brand.secondary }]}>
+                  {isBidVisible ? "Cancel Offer" : "Offer Fare"}
+                </Text>
               </TouchableOpacity>
             )}
           </View>
@@ -842,27 +963,97 @@ export default function BookRideScreen() {
             </TouchableOpacity>
           )}
 
-          {/* Bidding UI */}
-          {isBidVisible && bidAmount > 0 && (
-            <View style={[s.bidContainer, { backgroundColor: C.surface, borderColor: C.border }]}>
-              <Text style={[s.bidLabel, { color: C.text }]}>Your Suggested Fare</Text>
+          {/* Rider Price Adjustment / Bargaining UI */}
+          {isBidVisible && adjSettings.enabled && (
+            <View style={[s.bidContainer, { backgroundColor: C.surface, borderColor: isBidOutOfRange ? '#EF4444' : C.border }]}>
+              {/* Header: Platform Estimate & Allowed Range Badge */}
+              <View style={s.bidHeaderRow}>
+                <View>
+                  <Text style={[s.bidSubTitle, { color: C.textMuted }]}>Platform Estimate</Text>
+                  <Text style={[s.bidPlatformPrice, { color: C.text }]}>{formatCurrency(platformEstimatedFare)}</Text>
+                </View>
+                <View style={[s.bidRangeBadge, { backgroundColor: isBidOutOfRange ? '#FEE2E2' : (isDark ? '#1E293B' : '#F1F5F9') }]}>
+                  <Ionicons name="options-outline" size={14} color={isBidOutOfRange ? '#EF4444' : Colors.brand.secondary} />
+                  <Text style={[s.bidRangeBadgeTxt, { color: isBidOutOfRange ? '#EF4444' : C.textSecondary }]}>
+                    Limit: {formatCurrency(minAllowedFare)} – {formatCurrency(maxAllowedFare)}
+                  </Text>
+                </View>
+              </View>
+
+              <View style={s.bidDivider} />
+
+              {/* Proposed Fare Controls */}
+              <Text style={[s.bidLabel, { color: C.text }]}>Your Proposed Fare</Text>
               <View style={s.bidControlsRow}>
                 <TouchableOpacity 
-                  style={[s.bidCtrlBtn, { backgroundColor: C.surfaceAlt }]}
-                  onPress={() => setBidAmount(prev => Math.max(selectedRide.base_fare ?? 500, prev - 100))}
+                  style={[
+                    s.bidCtrlBtn, 
+                    { backgroundColor: C.surfaceAlt },
+                    bidAmount <= minAllowedFare && { opacity: 0.4 }
+                  ]}
+                  onPress={() => handleStepBid(-50)}
+                  disabled={bidAmount <= minAllowedFare}
                 >
-                  <Ionicons name="remove" size={24} color={C.text} />
+                  <Ionicons name="remove" size={22} color={C.text} />
                 </TouchableOpacity>
                 
-                <Text style={[s.bidAmountTxt, { color: Colors.brand.secondary }]}>{formatCurrency(bidAmount)}</Text>
+                <View style={[
+                  s.bidInputWrap, 
+                  { 
+                    backgroundColor: C.background,
+                    borderColor: isBidOutOfRange ? '#EF4444' : (bidAmount !== platformEstimatedFare ? Colors.brand.secondary : C.border)
+                  }
+                ]}>
+                  <Text style={[s.bidCurrencySymbol, { color: Colors.brand.secondary }]}>₦</Text>
+                  <TextInput
+                    value={bidInputText}
+                    onChangeText={handleBidInputChange}
+                    keyboardType="number-pad"
+                    maxLength={7}
+                    style={[s.bidTextInput, { color: C.text }]}
+                    selectTextOnFocus
+                    placeholder="0"
+                    placeholderTextColor={C.textMuted}
+                  />
+                </View>
                 
                 <TouchableOpacity 
-                  style={[s.bidCtrlBtn, { backgroundColor: C.surfaceAlt }]}
-                  onPress={() => setBidAmount(prev => prev + 100)}
+                  style={[
+                    s.bidCtrlBtn, 
+                    { backgroundColor: C.surfaceAlt },
+                    bidAmount >= maxAllowedFare && { opacity: 0.4 }
+                  ]}
+                  onPress={() => handleStepBid(50)}
+                  disabled={bidAmount >= maxAllowedFare}
                 >
-                  <Ionicons name="add" size={24} color={C.text} />
+                  <Ionicons name="add" size={22} color={C.text} />
                 </TouchableOpacity>
               </View>
+
+              {/* Status / Validation Feedback */}
+              {isBidOutOfRange ? (
+                <View style={s.bidWarningRow}>
+                  <Ionicons name="alert-circle" size={16} color="#EF4444" />
+                  <Text style={s.bidWarningTxt}>
+                    Offer must be between {formatCurrency(minAllowedFare)} and {formatCurrency(maxAllowedFare)}
+                  </Text>
+                </View>
+              ) : bidAmount !== platformEstimatedFare ? (
+                <View style={s.bidDiffRow}>
+                  <Text style={[
+                    s.bidDiffTxt, 
+                    { color: bidAmount > platformEstimatedFare ? '#10B981' : Colors.brand.secondary }
+                  ]}>
+                    {bidAmount > platformEstimatedFare 
+                      ? `+${formatCurrency(bidAmount - platformEstimatedFare)} (+${Math.round(((bidAmount - platformEstimatedFare) / platformEstimatedFare) * 100)}%) for faster pickup` 
+                      : `-${formatCurrency(platformEstimatedFare - bidAmount)} (-${Math.round(((platformEstimatedFare - bidAmount) / platformEstimatedFare) * 100)}%) rider discount offer`}
+                  </Text>
+                </View>
+              ) : (
+                <Text style={[s.bidHintTxt, { color: C.textMuted }]}>
+                  Use + / − or type directly to adjust within Admin limits (-{adjSettings.max_downward_percent}% / +{adjSettings.max_upward_percent}%)
+                </Text>
+              )}
             </View>
           )}
 
@@ -916,23 +1107,29 @@ export default function BookRideScreen() {
         {/* Book Action */}
         <View style={[s.bookActionWrap, { paddingBottom: insets.bottom + 20 }]}>
           <TouchableOpacity
-            style={[s.bookBtn, { backgroundColor: Colors.brand.secondary, opacity: isBooking ? 0.7 : 1 }]}
+            style={[
+              s.bookBtn, 
+              { backgroundColor: Colors.brand.secondary },
+              (isBooking || isBidOutOfRange) && { opacity: 0.6 }
+            ]}
             activeOpacity={0.8}
             onPress={handleBook}
-            disabled={isBooking}
+            disabled={isBooking || isBidOutOfRange}
           >
             {isBooking ? (
               <ActivityIndicator color="#fff" />
             ) : (
               <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
                 <Text style={s.bookBtnTxt}>
-                  {isBidVisible 
-                    ? `Bid ${formatCurrency(Math.max(0, bidAmount - discountAmount))}` 
-                    : !(selectedRide.is_available ?? ((selectedRide.available_drivers_count || 0) > 0)) && scheduleTime === 'Now'
-                      ? `No ${selectedRide.name} Drivers Available`
-                      : isSharedRide && selectedRide.supports_shared_rides
-                        ? `Book Shared ${formatCurrency(Math.max(0, computedFareBeforeDiscount - discountAmount))}`
-                        : `Book ${selectedRide.name} ${formatCurrency(Math.max(0, computedFareBeforeDiscount - discountAmount))}`
+                  {isBidOutOfRange
+                    ? `Enter Valid Offer (${formatCurrency(minAllowedFare)} - ${formatCurrency(maxAllowedFare)})`
+                    : isBidVisible && adjSettings.enabled && bidAmount !== platformEstimatedFare
+                      ? `Offer ${formatCurrency(Math.max(0, bidAmount - discountAmount))}`
+                      : !(selectedRide.is_available ?? ((selectedRide.available_drivers_count || 0) > 0)) && scheduleTime === 'Now'
+                        ? `No ${selectedRide.name} Drivers Available`
+                        : isSharedRide && selectedRide.supports_shared_rides
+                          ? `Book Shared ${formatCurrency(Math.max(0, computedFareBeforeDiscount - discountAmount))}`
+                          : `Book ${selectedRide.name} ${formatCurrency(Math.max(0, computedFareBeforeDiscount - discountAmount))}`
                   }
                 </Text>
                 {discountAmount > 0 && (
@@ -1553,21 +1750,53 @@ const s = StyleSheet.create({
   },
   bidContainer: {
     borderWidth: 1,
-    borderRadius: 10,
+    borderRadius: 12,
     padding: 16,
     marginBottom: 20,
+  },
+  bidHeaderRow: {
+    flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 12,
+  },
+  bidSubTitle: {
+    fontSize: 12,
+    fontWeight: '500',
+    marginBottom: 2,
+  },
+  bidPlatformPrice: {
+    fontSize: 16,
+    fontWeight: '700',
+  },
+  bidRangeBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 12,
+  },
+  bidRangeBadgeTxt: {
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  bidDivider: {
+    height: 1,
+    backgroundColor: 'rgba(150, 150, 150, 0.15)',
+    marginBottom: 14,
   },
   bidLabel: {
-    fontSize: 14,
+    fontSize: 13,
     fontWeight: '600',
-    marginBottom: 16,
+    marginBottom: 12,
+    textAlign: 'center',
   },
   bidControlsRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 32,
+    gap: 16,
   },
   bidCtrlBtn: {
     width: 44,
@@ -1576,9 +1805,54 @@ const s = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  bidAmountTxt: {
-    fontSize: 24,
+  bidInputWrap: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderWidth: 1.5,
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    height: 48,
+    minWidth: 140,
+    justifyContent: 'center',
+  },
+  bidCurrencySymbol: {
+    fontSize: 20,
     fontWeight: '800',
+    marginRight: 4,
+  },
+  bidTextInput: {
+    fontSize: 22,
+    fontWeight: '800',
+    minWidth: 60,
+    textAlign: 'center',
+    paddingVertical: 0,
+  },
+  bidWarningRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    marginTop: 12,
+    paddingHorizontal: 8,
+  },
+  bidWarningTxt: {
+    color: '#EF4444',
+    fontSize: 12,
+    fontWeight: '600',
+    textAlign: 'center',
+  },
+  bidDiffRow: {
+    alignItems: 'center',
+    marginTop: 10,
+  },
+  bidDiffTxt: {
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  bidHintTxt: {
+    fontSize: 11,
+    textAlign: 'center',
+    marginTop: 10,
   },
 
   /* Modal Styles */

@@ -61,6 +61,9 @@ class ManageSettings extends Page implements HasForms
             'smtp_encryption' => env('MAIL_ENCRYPTION', 'tls'),
             'smtp_from_address' => env('MAIL_FROM_ADDRESS', 'no-reply@goride.app'),
             'smtp_from_name' => env('MAIL_FROM_NAME', 'GoRide'),
+            'enable_price_adjustment' => true,
+            'max_downward_adjustment_percent' => 10,
+            'max_upward_adjustment_percent' => 20,
         ];
 
         $this->form->fill(array_merge($defaults, $settings));
@@ -117,6 +120,34 @@ class ManageSettings extends Page implements HasForms
                                     ->numeric()
                                     ->step(0.1)
                                     ->default(2.5),
+                                \Filament\Schemas\Components\Section::make('Rider Price Adjustment / Bargaining')
+                                    ->description('Configure controlled rider fare adjustment and bargaining boundaries.')
+                                    ->icon('heroicon-o-scale')
+                                    ->columns(3)
+                                    ->schema([
+                                        Forms\Components\Toggle::make('enable_price_adjustment')
+                                            ->label('Enable Rider Price Adjustment')
+                                            ->helperText('When enabled, riders can propose custom fares within the bounds below.')
+                                            ->default(true),
+                                        Forms\Components\TextInput::make('max_downward_adjustment_percent')
+                                            ->label('Max Downward Adjustment (%)')
+                                            ->helperText('Max discount percentage below the platform estimated fare.')
+                                            ->numeric()
+                                            ->suffix('%')
+                                            ->minValue(0)
+                                            ->maxValue(50)
+                                            ->default(10)
+                                            ->required(),
+                                        Forms\Components\TextInput::make('max_upward_adjustment_percent')
+                                            ->label('Max Upward Adjustment (%)')
+                                            ->helperText('Max premium percentage above the platform estimated fare.')
+                                            ->numeric()
+                                            ->suffix('%')
+                                            ->minValue(0)
+                                            ->maxValue(100)
+                                            ->default(20)
+                                            ->required(),
+                                    ]),
                             ]),
                         \Filament\Schemas\Components\Tabs\Tab::make('Payment Gateways')
                             ->icon('heroicon-o-credit-card')

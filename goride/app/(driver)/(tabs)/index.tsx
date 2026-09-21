@@ -851,9 +851,18 @@ export default function DriverHomeIndex() {
                   </View>
                   <View style={{ alignItems: 'flex-end' }}>
                     <Text style={[s.priceTxt, { color: C.text }]}>₦{(displayFare || 0).toLocaleString()}</Text>
-                    {isDelivery && item.offer_fare && item.offer_fare !== item.fare && (
+                    {isDelivery && item.offer_fare && item.offer_fare !== item.fare ? (
                       <Text style={{ fontSize: 11, color: Colors.brand.secondary, fontWeight: '700' }}>Bid Price</Text>
-                    )}
+                    ) : !isDelivery && item.estimated_fare && Number(item.estimated_fare) !== Number(item.fare) ? (
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 2 }}>
+                        <Text style={{ fontSize: 11, color: Number(item.fare) > Number(item.estimated_fare) ? '#10B981' : Colors.brand.secondary, fontWeight: '700' }}>
+                          {Number(item.fare) > Number(item.estimated_fare) ? 'Higher Offer' : 'Rider Offer'}
+                        </Text>
+                        <Text style={{ fontSize: 10, color: C.textMuted, textDecorationLine: 'line-through' }}>
+                          ₦{Number(item.estimated_fare).toLocaleString()}
+                        </Text>
+                      </View>
+                    ) : null}
                   </View>
                 </View>
 
@@ -957,7 +966,7 @@ export default function DriverHomeIndex() {
 
 const s = StyleSheet.create({
   root: { flex: 1 },
-  map: { ...StyleSheet.absoluteFillObject },
+  map: { ...(StyleSheet.absoluteFill as any) },
   arrowWrap: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
   activeBanner: {
     marginTop: 16,
