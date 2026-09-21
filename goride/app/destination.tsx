@@ -231,6 +231,7 @@ export default function DestinationScreen() {
                 <GooglePlacesAutocomplete
                   placeholder={currentAddress || "Pickup Location"}
                   fetchDetails
+                  listViewProps={{ scrollEnabled: false }}
                   onPress={(data, details = null) => {
                     if (details) {
                       setCurrentLocation({
@@ -303,6 +304,7 @@ export default function DestinationScreen() {
                   ref={googleInputRef}
                   placeholder="Where to?"
                   fetchDetails
+                  listViewProps={{ scrollEnabled: false }}
                   onPress={(data, details = null) => {
                     if (details) {
                       const place = {

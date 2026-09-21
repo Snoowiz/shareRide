@@ -158,8 +158,9 @@ export default function HomeScreen() {
         fetchRecentPlaces();
 
         // Subscribe to real-time driver updates
+        const channelName = `available-drivers-${Math.random().toString(36).substring(7)}`;
         const channel = supabase
-          .channel('available-drivers')
+          .channel(channelName)
           .on(
             'postgres_changes',
             { event: '*', schema: 'public', table: 'available_drivers' },
@@ -192,8 +193,9 @@ export default function HomeScreen() {
   useEffect(() => {
     fetchFeaturedCoupon();
 
+    const couponChannelName = `home-coupon-sync-${Math.random().toString(36).substring(7)}`;
     const couponChannel = supabase
-      .channel('home-coupon-sync')
+      .channel(couponChannelName)
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'coupons' },
