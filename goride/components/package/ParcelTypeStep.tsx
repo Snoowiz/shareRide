@@ -1,11 +1,19 @@
 import React from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, ActivityIndicator } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Colors } from '@/constants/Colors';
 import { useAppContext } from '@/context/AppContext';
-import { PARCEL_TYPES, ParcelType } from '@/context/PackageDeliveryContext';
+import { FALLBACK_PARCEL_TYPES, ParcelType, usePackageDelivery } from '@/context/PackageDeliveryContext';
+
+let SvgXml: any = null;
+try {
+  const SvgModule = require('react-native-svg');
+  SvgXml = SvgModule.SvgXml;
+} catch (e) {
+  // Graceful fallback if native svg is pending
+}
 
 interface Props {
   selected: ParcelType | null;
@@ -16,7 +24,10 @@ interface Props {
 export default function ParcelTypeStep({ selected, onSelect, onNext }: Props) {
   const insets = useSafeAreaInsets();
   const { colorScheme } = useAppContext();
+  const { parcelTypes, loadingParcelTypes } = usePackageDelivery();
   const C = Colors[colorScheme];
+
+  const typesToRender = (parcelTypes && parcelTypes.length > 0) ? parcelTypes : FALLBACK_PARCEL_TYPES;
 
   return (
     <View style={s.container}>
@@ -29,11 +40,11 @@ export default function ParcelTypeStep({ selected, onSelect, onNext }: Props) {
       </View>
 
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={s.grid}>
-        {PARCEL_TYPES.map((type) => {
-          const isActive = selected?.id === type.id;
+        {typesToRender.map((type) => {
+          const isActive = selected?.id === type.id || selected?.code === type.code;
           return (
             <TouchableOpacity
-              key={type.id}
+              key={type.id || type.code}
               activeOpacity={0.8}
               onPress={() => onSelect(type)}
               style={[
@@ -45,9 +56,13 @@ export default function ParcelTypeStep({ selected, onSelect, onNext }: Props) {
               ]}
             >
               <View style={[s.cardIcon, { backgroundColor: isActive ? Colors.brand.primary + '20' : C.surfaceAlt }]}>
-                <Ionicons name={type.icon as any} size={24} color={isActive ? Colors.brand.primary : C.textMuted} />
+                {type.icon_svg && SvgXml ? (
+                  <SvgXml xml={type.icon_svg} width={24} height={24} />
+                ) : (
+                  <Ionicons name={(type.icon_name || type.icon || 'cube-outline') as any} size={24} color={isActive ? Colors.brand.primary : C.textMuted} />
+                )}
               </View>
-              <Text style={[s.cardLabel, { color: isActive ? Colors.brand.primary : C.text }]}>{type.label}</Text>
+              <Text style={[s.cardLabel, { color: isActive ? Colors.brand.primary : C.text }]}>{type.label || type.name}</Text>
               <Text style={[s.cardDesc, { color: C.textMuted }]} numberOfLines={1}>{type.description}</Text>
               {isActive && (
                 <View style={s.checkMark}>

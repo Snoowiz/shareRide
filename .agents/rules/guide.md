@@ -62,6 +62,11 @@ The admin dashboard is located in `/admin-web`. It is used to manage the entire 
 - **Functionality**: As you edit the admin panel or the mobile app, ensure the admin panel remains functional, operating, and dynamic.
 - **Integration**: The admin panel must reflect the data structures and business logic used in the mobile app (e.g., Rides, Deliveries, Support Tickets, Withdrawals).
 - **Schema Consistency**: Ensure any database changes are compatible with both the Laravel backend and the Supabase integration used by the mobile app.
+- **Section & Navigation Organization**:
+  - Whenever introducing a new feature, domain entity, or setting category (e.g., Ride Types, Parcel Types, Payment Gateways), assign it to a designated, logical section in the Admin Panel navigation.
+  - Group resources cohesively under appropriate Navigation Groups (e.g. `Fleet`, `Operations`, `Finance`, `Users & Drivers`, `Support`, `Settings`).
+  - Never dump dynamic domain entities into a generic "General" settings section as plain text/tag inputs. Build dedicated Filament Resources with structured forms, tables, active toggles, icons, and full CRUD capabilities.
+  - Maintain clean, descriptive navigation labels, icons (`heroicon-o-*`), and explicit sort orders.
 
 ---
 

@@ -1,11 +1,18 @@
-import React, { createContext, useContext, useState, useCallback } from 'react';
+import React, { createContext, useContext, useState, useCallback, useEffect } from 'react';
+import { supabase } from '@/lib/supabase';
 
 // ─── Types ───────────────────────────────────────────────────────────
 export type ParcelType = {
   id: string;
+  code?: string;
   label: string;
+  name?: string;
   icon: string; // Ionicons name
+  icon_name?: string;
+  icon_svg?: string | null;
   description: string;
+  display_order?: number;
+  is_active?: boolean;
 };
 
 export type ContactInfo = {
@@ -58,15 +65,17 @@ export interface PackageDeliveryState {
   termsAccepted: boolean;
 }
 
-// ─── Parcel Categories (will be dynamic from admin later) ────────────
-export const PARCEL_TYPES: ParcelType[] = [
-  { id: 'fragile', label: 'Fragile', icon: 'wine-outline', description: 'Glass, ceramics, electronics' },
-  { id: 'documents', label: 'Documents', icon: 'document-text-outline', description: 'Papers, letters, files' },
-  { id: 'gift', label: 'Gift', icon: 'gift-outline', description: 'Wrapped items, presents' },
-  { id: 'food', label: 'Food', icon: 'fast-food-outline', description: 'Meals, perishables' },
-  { id: 'clothing', label: 'Clothing', icon: 'shirt-outline', description: 'Garments, fabrics' },
-  { id: 'other', label: 'Other', icon: 'cube-outline', description: 'General items' },
+// ─── Fallback Parcel Categories (matches Supabase seed) ─────────────
+export const FALLBACK_PARCEL_TYPES: ParcelType[] = [
+  { id: 'fragile', code: 'fragile', label: 'Fragile', name: 'Fragile', icon: 'wine-outline', icon_name: 'wine-outline', description: 'Glass, ceramics, electronics', display_order: 1, is_active: true },
+  { id: 'documents', code: 'documents', label: 'Documents', name: 'Documents', icon: 'document-text-outline', icon_name: 'document-text-outline', description: 'Papers, letters, files', display_order: 2, is_active: true },
+  { id: 'gift', code: 'gift', label: 'Gift', name: 'Gift', icon: 'gift-outline', icon_name: 'gift-outline', description: 'Wrapped items, presents', display_order: 3, is_active: true },
+  { id: 'food', code: 'food', label: 'Food', name: 'Food', icon: 'fast-food-outline', icon_name: 'fast-food-outline', description: 'Meals, perishables', display_order: 4, is_active: true },
+  { id: 'clothing', code: 'clothing', label: 'Clothing', name: 'Clothing', icon: 'shirt-outline', icon_name: 'shirt-outline', description: 'Garments, fabrics', display_order: 5, is_active: true },
+  { id: 'other', code: 'other', label: 'Other', name: 'Other', icon: 'cube-outline', icon_name: 'cube-outline', description: 'General items', display_order: 6, is_active: true },
 ];
+
+export const PARCEL_TYPES = FALLBACK_PARCEL_TYPES;
 
 export const VEHICLE_TYPES: VehicleType[] = [
   { id: 'bike', name: 'Bike', icon: 'bicycle', baseFare: 400, pricePerKm: 80, capacity: 'Up to 5kg' },
@@ -76,6 +85,9 @@ export const VEHICLE_TYPES: VehicleType[] = [
 // ─── Context Interface ──────────────────────────────────────────────
 interface PackageDeliveryContextType {
   state: PackageDeliveryState;
+  parcelTypes: ParcelType[];
+  loadingParcelTypes: boolean;
+  refreshParcelTypes: () => Promise<void>;
   setParcelType: (type: ParcelType) => void;
   setSenderInfo: (info: Partial<ContactInfo>) => void;
   setReceiverInfo: (info: Partial<ContactInfo>) => void;
@@ -120,6 +132,56 @@ const PackageDeliveryContext = createContext<PackageDeliveryContextType | undefi
 
 export function PackageDeliveryProvider({ children }: { children: React.ReactNode }) {
   const [state, setState] = useState<PackageDeliveryState>(initialState);
+  const [parcelTypes, setParcelTypes] = useState<ParcelType[]>(FALLBACK_PARCEL_TYPES);
+  const [loadingParcelTypes, setLoadingParcelTypes] = useState<boolean>(true);
+
+  const fetchParcelTypes = useCallback(async () => {
+    try {
+      const { data, error } = await supabase
+        .from('parcel_types')
+        .select('*')
+        .eq('is_active', true)
+        .order('display_order', { ascending: true });
+
+      if (!error && data && data.length > 0) {
+        const mapped: ParcelType[] = data.map((item: any) => ({
+          id: item.code || item.id,
+          code: item.code,
+          label: item.name,
+          name: item.name,
+          icon: item.icon_name || 'cube-outline',
+          icon_name: item.icon_name || 'cube-outline',
+          icon_svg: item.icon_svg || null,
+          description: item.description || '',
+          display_order: item.display_order ?? 0,
+          is_active: item.is_active ?? true,
+        }));
+        setParcelTypes(mapped);
+      }
+    } catch (err) {
+      console.warn('Failed to load parcel types from Supabase:', err);
+    } finally {
+      setLoadingParcelTypes(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchParcelTypes();
+
+    const channelName = `parcel-types-sync-${Math.random().toString(36).substring(7)}`;
+    const channel = supabase
+      .channel(channelName)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'parcel_types' },
+        () => fetchParcelTypes()
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [fetchParcelTypes]);
 
   const setParcelType = useCallback((type: ParcelType) => {
     setState(prev => ({ ...prev, parcelType: type }));
@@ -192,6 +254,9 @@ export function PackageDeliveryProvider({ children }: { children: React.ReactNod
   return (
     <PackageDeliveryContext.Provider value={{
       state,
+      parcelTypes,
+      loadingParcelTypes,
+      refreshParcelTypes: fetchParcelTypes,
       setParcelType,
       setSenderInfo,
       setReceiverInfo,

@@ -93,9 +93,6 @@ class ManageSettings extends Page implements HasForms
                                 Forms\Components\TagsInput::make('vehicle_categories')
                                     ->label('Vehicle Categories')
                                     ->helperText('Available vehicle types for rides and deliveries.'),
-                                Forms\Components\TagsInput::make('parcel_categories')
-                                    ->label('Parcel Categories')
-                                    ->helperText('Available parcel types for deliveries (e.g. Documents, Food, Electronics).'),
                             ]),
                         \Filament\Schemas\Components\Tabs\Tab::make('Pricing & Fees')
                             ->icon('heroicon-o-currency-dollar')
