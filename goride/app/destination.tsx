@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, Platform, Keyboard, TouchableWithoutFeedback } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, Platform, Keyboard, TouchableWithoutFeedback, ScrollView } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -50,7 +50,7 @@ export default function DestinationScreen() {
 
   const bottomSheetRef = React.useRef<BottomSheet>(null);
   const googleInputRef = React.useRef<any>(null);
-  const snapPoints = React.useMemo(() => ['45%', '85%'], []);
+  const snapPoints = React.useMemo(() => ['92%'], []);
 
   useEffect(() => {
     if (authUser?.id) {
@@ -270,10 +270,12 @@ export default function DestinationScreen() {
           index={0}
           snapPoints={snapPoints}
           keyboardBehavior="extend"
+          enablePanDownToClose={false}
+          enableOverDrag={false}
           handleIndicatorStyle={{ backgroundColor: C.border }}
           backgroundStyle={{ backgroundColor: C.background }}
         >
-          <BottomSheetView style={[s.bottomSheetView, { paddingBottom: insets.bottom + 20 }]}>
+          <BottomSheetView style={[s.bottomSheetView, { paddingBottom: insets.bottom + 90 }]}>
           <View style={s.header}>
             <TouchableOpacity onPress={() => router.back()} style={s.backBtn}>
               <Ionicons name="chevron-back" size={24} color={C.text} />
@@ -460,25 +462,26 @@ export default function DestinationScreen() {
               <ActivityIndicator size="small" color={C.tint} style={{ marginTop: 20 }} />
             ) : history.length > 0 ? (
               <View style={[s.historyCard, { backgroundColor: C.surface, borderColor: C.border }]}>
-                {history.map((item, index) => (
-                  <TouchableOpacity 
-                    key={item.id} 
-                    style={[s.historyRow, index < history.length - 1 && { borderBottomWidth: 1, borderBottomColor: C.border }]}
-                    onPress={() => {
-                      setDestination({ lat: item.latitude, lng: item.longitude, address: item.address });
-                      googleInputRef.current?.setAddressText(item.address);
-                      bottomSheetRef.current?.collapse();
-                    }}
-                  >
-                    <View style={[s.historyIcon, { backgroundColor: C.surfaceAlt }]}>
-                      <Ionicons name="time-outline" size={18} color={C.icon} />
-                    </View>
-                    <View style={{ flex: 1 }}>
-                      <Text style={[s.historyName, { color: C.text }]} numberOfLines={1}>{item.name}</Text>
-                      <Text style={[s.historyAddr, { color: C.textMuted }]} numberOfLines={1}>{item.address}</Text>
-                    </View>
-                  </TouchableOpacity>
-                ))}
+                <ScrollView nestedScrollEnabled showsVerticalScrollIndicator={false} style={{ maxHeight: 280 }}>
+                  {history.map((item, index) => (
+                    <TouchableOpacity 
+                      key={item.id} 
+                      style={[s.historyRow, index < history.length - 1 && { borderBottomWidth: 1, borderBottomColor: C.border }]}
+                      onPress={() => {
+                        setDestination({ lat: item.latitude, lng: item.longitude, address: item.address });
+                        googleInputRef.current?.setAddressText(item.address);
+                      }}
+                    >
+                      <View style={[s.historyIcon, { backgroundColor: C.surfaceAlt }]}>
+                        <Ionicons name="time-outline" size={18} color={C.icon} />
+                      </View>
+                      <View style={{ flex: 1 }}>
+                        <Text style={[s.historyName, { color: C.text }]} numberOfLines={1}>{item.name}</Text>
+                        <Text style={[s.historyAddr, { color: C.textMuted }]} numberOfLines={1}>{item.address}</Text>
+                      </View>
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
               </View>
             ) : (
               <View style={s.emptyHistory}>
