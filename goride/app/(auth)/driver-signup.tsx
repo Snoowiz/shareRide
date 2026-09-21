@@ -16,19 +16,22 @@ import PhoneInput from '@/components/PhoneInput';
 import { uploadImage } from '@/lib/storage';
 import AlertModal from '@/components/AlertModal';
 import DateTimePicker from '@react-native-community/datetimepicker';
-import { GooglePlacesAutocomplete } from 'react-native-google-places-autocomplete';
 import Constants from 'expo-constants';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { supabase } from '@/lib/supabase';
 
 const STEP_STORAGE_KEY = '@goride_driver_signup_step';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const TOTAL_STEPS = 6;
 
-const VEHICLE_TYPES = [
-  { id: 'car', label: 'Car Driver', icon: 'car-sport', desc: 'Ride-sharing' },
-  { id: 'motorbike', label: 'Bike Courier', icon: 'bicycle', desc: 'Delivery' },
-] as const;
+// Default fallback categories if offline or loading
+const DEFAULT_RIDE_TYPES = [
+  { id: 'mini', code: 'mini', name: 'Mini', icon_name: 'car-sport', passenger_capacity: 3, description: 'Affordable, compact rides' },
+  { id: 'sedan', code: 'sedan', name: 'Sedan', icon_name: 'car', passenger_capacity: 4, description: 'Comfortable standard sedans' },
+  { id: 'xl', code: 'xl', name: 'GoXL', icon_name: 'bus', passenger_capacity: 6, description: 'Spacious vehicle for up to 6 seats' },
+  { id: 'premium', code: 'premium', name: 'Premium', icon_name: 'shield-checkmark', passenger_capacity: 4, description: 'Luxury executive chauffeur rides' },
+];
 
 const GENDER_OPTIONS = [
   { id: 'male', label: 'Male' },
@@ -100,6 +103,34 @@ export default function DriverSignupScreen() {
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [showGenderPicker, setShowGenderPicker] = useState(false);
   const [manualAddress, setManualAddress] = useState(false);
+
+  // Dynamic Ride Types from Backend
+  const [backendRideTypes, setBackendRideTypes] = useState<any[]>(DEFAULT_RIDE_TYPES);
+  const [loadingRideTypes, setLoadingRideTypes] = useState(false);
+
+  useEffect(() => {
+    let isMounted = true;
+    const fetchRideTypes = async () => {
+      setLoadingRideTypes(true);
+      try {
+        const { data: rtData, error } = await supabase
+          .from('ride_types')
+          .select('*')
+          .eq('is_active', true)
+          .order('display_order', { ascending: true });
+
+        if (!error && rtData && rtData.length > 0 && isMounted) {
+          setBackendRideTypes(rtData);
+        }
+      } catch (err) {
+        console.warn('Error fetching ride types for registration:', err);
+      } finally {
+        if (isMounted) setLoadingRideTypes(false);
+      }
+    };
+    fetchRideTypes();
+    return () => { isMounted = false; };
+  }, []);
 
   const progressAnim = useRef(new Animated.Value(1)).current;
   const fadeAnim = useRef(new Animated.Value(1)).current;
@@ -361,38 +392,62 @@ export default function DriverSignupScreen() {
   const renderStep1 = () => (
     <View>
       <Text style={[st.stepTitle, { color: C.text }]}>What do you drive?</Text>
-      <Text style={[st.stepDesc, { color: C.textSecondary }]}>Select the type of vehicle you will use</Text>
-      <View style={[st.vehicleGrid, { flexDirection: 'row' }]}>
-        {VEHICLE_TYPES.map((v) => {
-          const selected = data.driverType === v.id;
-          return (
-            <TouchableOpacity
-              key={v.id}
-              style={[st.vehicleCard, {
-                backgroundColor: selected ? accent + '15' : C.surface,
-                borderColor: selected ? accent : C.border,
-                flex: 1,
-              }]}
-              onPress={() => { update({ driverType: v.id, vehicleType: v.id === 'car' ? 'Car' : 'Motorcycle' }); setErrors({}); }}
-              activeOpacity={0.8}
-            >
-              {selected && (
-                <View style={st.vehicleCheck}>
-                  <Ionicons name="checkmark-circle" size={22} color={accent} />
-                </View>
-              )}
-              <LinearGradient
-                colors={selected ? [accent, Colors.brand.secondaryLight] : [C.surfaceAlt, C.surfaceAlt]}
-                style={st.vehicleIconWrap}
+      <Text style={[st.stepDesc, { color: C.textSecondary }]}>Select the ride type category of your vehicle</Text>
+      
+      {loadingRideTypes ? (
+        <View style={{ paddingVertical: 40, alignItems: 'center' }}>
+          <ActivityIndicator size="large" color={accent} />
+          <Text style={{ color: C.textSecondary, marginTop: 12, fontSize: 13 }}>Loading available categories...</Text>
+        </View>
+      ) : (
+        <View style={st.vehicleGrid}>
+          {backendRideTypes.map((v) => {
+            const isSelected = data.rideTypeId === v.id || data.driverType === v.code;
+            return (
+              <TouchableOpacity
+                key={v.id || v.code}
+                style={[st.vehicleCard, {
+                  backgroundColor: isSelected ? accent + '15' : C.surface,
+                  borderColor: isSelected ? accent : C.border,
+                }]}
+                onPress={() => {
+                  update({
+                    rideTypeId: v.id,
+                    driverType: v.code,
+                    vehicleType: 'Car',
+                  });
+                  setErrors({});
+                }}
+                activeOpacity={0.8}
               >
-                <Ionicons name={v.icon as any} size={32} color={selected ? '#000' : C.icon} />
-              </LinearGradient>
-              <Text style={[st.vehicleName, { color: C.text }]}>{v.label}</Text>
-            </TouchableOpacity>
-          );
-        })}
-      </View>
-      {errors.driverType ? <Text style={[st.errorTxt, { textAlign: 'center' }]}>{errors.driverType}</Text> : null}
+                {isSelected && (
+                  <View style={st.vehicleCheck}>
+                    <Ionicons name="checkmark-circle" size={22} color={accent} />
+                  </View>
+                )}
+                <LinearGradient
+                  colors={isSelected ? [accent, Colors.brand.secondaryLight] : [C.surfaceAlt, C.surfaceAlt]}
+                  style={st.vehicleIconWrap}
+                >
+                  <Ionicons name={(v.icon_name || 'car') as any} size={28} color={isSelected ? '#000' : C.icon} />
+                </LinearGradient>
+                <View style={{ flex: 1 }}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                    <Text style={[st.vehicleName, { color: C.text }]}>{v.name}</Text>
+                    <View style={{ backgroundColor: C.surfaceAlt, paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6 }}>
+                      <Text style={{ fontSize: 11, fontWeight: '700', color: C.textSecondary }}>{v.passenger_capacity} Seats</Text>
+                    </View>
+                  </View>
+                  {v.description ? (
+                    <Text style={[st.vehicleDesc, { color: C.textSecondary }]} numberOfLines={2}>{v.description}</Text>
+                  ) : null}
+                </View>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+      )}
+      {errors.driverType ? <Text style={[st.errorTxt, { textAlign: 'center', marginTop: 10 }]}>{errors.driverType}</Text> : null}
     </View>
   );
 

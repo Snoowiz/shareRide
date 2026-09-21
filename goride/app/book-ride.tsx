@@ -49,25 +49,37 @@ type PromoCoupon = {
   per_user_limit: number | null;
 };
 
-type RideType = {
+type DynamicRideType = {
   id: string;
+  code: string;
   name: string;
-  icon: keyof typeof Ionicons.glyphMap;
-  seats: number;
-  baseFare: number;
-  pricePerKm: number;
-  pricePerMin: number;
-  etaMins: number; // base ETA offset
+  description: string | null;
+  icon_name: string;
+  image_url: string | null;
+  passenger_capacity: number;
+  base_fare: number;
+  price_per_km: number;
+  price_per_min: number;
+  minimum_fare: number;
+  estimated_pickup_mins: number;
+  supports_shared_rides: boolean;
+  shared_discount_percentage: number;
+  display_order: number;
+  is_active: boolean;
+  calculated_fare?: number;
+  shared_fare?: number;
+  available_drivers_count?: number;
+  is_available?: boolean;
 };
 
-const RIDE_TYPES: RideType[] = [
-  { id: 'mini', name: 'Mini', icon: 'car-sport', seats: 3, baseFare: 500, pricePerKm: 120, pricePerMin: 25, etaMins: 5 },
-  { id: 'sedan', name: 'Sedan', icon: 'car', seats: 4, baseFare: 800, pricePerKm: 180, pricePerMin: 40, etaMins: 8 },
-  { id: 'xl', name: 'GoXL', icon: 'bus', seats: 6, baseFare: 1200, pricePerKm: 250, pricePerMin: 60, etaMins: 12 },
+const FALLBACK_RIDE_TYPES: DynamicRideType[] = [
+  { id: 'mini', code: 'mini', name: 'Mini', description: 'Affordable, compact rides', icon_name: 'car-sport', image_url: null, passenger_capacity: 3, base_fare: 500, price_per_km: 120, price_per_min: 25, minimum_fare: 500, estimated_pickup_mins: 5, supports_shared_rides: false, shared_discount_percentage: 0, display_order: 1, is_active: true, is_available: false, available_drivers_count: 0 },
+  { id: 'sedan', code: 'sedan', name: 'Sedan', description: 'Comfortable standard sedans', icon_name: 'car', image_url: null, passenger_capacity: 4, base_fare: 800, price_per_km: 180, price_per_min: 40, minimum_fare: 800, estimated_pickup_mins: 8, supports_shared_rides: true, shared_discount_percentage: 20, display_order: 2, is_active: true, is_available: false, available_drivers_count: 0 },
+  { id: 'xl', code: 'xl', name: 'GoXL', description: 'Spacious for groups or luggage', icon_name: 'bus', image_url: null, passenger_capacity: 6, base_fare: 1200, price_per_km: 250, price_per_min: 60, minimum_fare: 1200, estimated_pickup_mins: 12, supports_shared_rides: true, shared_discount_percentage: 25, display_order: 3, is_active: true, is_available: false, available_drivers_count: 0 },
 ];
 
 const formatCurrency = (amount: number) => {
-  return `₦${amount.toLocaleString('en-NG', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
+  return `₦${Math.round(amount).toLocaleString('en-NG', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
 };
 
 export default function BookRideScreen() {
@@ -81,7 +93,13 @@ export default function BookRideScreen() {
 
   const [distanceKm, setDistanceKm] = useState<number>(0);
   const [durationMins, setDurationMins] = useState<number>(0);
-  const [selectedRide, setSelectedRide] = useState<RideType>(RIDE_TYPES[0]);
+
+  // Dynamic Backend Ride Types
+  const [rideTypes, setRideTypes] = useState<DynamicRideType[]>(FALLBACK_RIDE_TYPES);
+  const [loadingRideTypes, setLoadingRideTypes] = useState<boolean>(true);
+  const [selectedRide, setSelectedRide] = useState<DynamicRideType>(FALLBACK_RIDE_TYPES[0]);
+  const [isSharedRide, setIsSharedRide] = useState<boolean>(false);
+  const [passengerCount, setPassengerCount] = useState<number>(1);
   const [surgeMultiplier, setSurgeMultiplier] = useState<number>(1.0);
   
   const [isScheduleVisible, setScheduleVisible] = useState(false);
@@ -176,9 +194,63 @@ export default function BookRideScreen() {
     fetchAvailableCoupons();
   }, [fetchAvailableCoupons]);
 
+  // Authoritative dynamic ride types fetcher
+  const fetchAvailableRideTypes = useCallback(async () => {
+    try {
+      const { data, error } = await supabase.rpc('get_available_ride_types_with_pricing', {
+        p_distance_km: distanceKm || 0,
+        p_duration_mins: durationMins || 0,
+      });
+
+      if (!error && data && data.length > 0) {
+        setRideTypes(data as DynamicRideType[]);
+        setSelectedRide(prev => {
+          const matching = data.find((r: DynamicRideType) => r.id === prev?.id || r.code === prev?.code);
+          if (matching) return matching;
+          const firstAvailable = data.find((r: DynamicRideType) => r.is_available);
+          return firstAvailable || data[0];
+        });
+      }
+    } catch (err) {
+      console.warn('Error loading dynamic ride types:', err);
+    } finally {
+      setLoadingRideTypes(false);
+    }
+  }, [distanceKm, durationMins]);
+
+  useEffect(() => {
+    fetchAvailableRideTypes();
+
+    // Subscribe to driver availability and active rides changes for live real-time sync
+    const channel = supabase
+      .channel('public-ride-types-availability-sync')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'available_drivers' },
+        () => fetchAvailableRideTypes()
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'rides' },
+        () => fetchAvailableRideTypes()
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'ride_types' },
+        () => fetchAvailableRideTypes()
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [fetchAvailableRideTypes]);
+
   const computedFareBeforeDiscount = isBidVisible && bidAmount > 0
     ? bidAmount 
-    : Math.round((selectedRide.baseFare + (distanceKm * selectedRide.pricePerKm) + (durationMins * selectedRide.pricePerMin)) / 50) * 50;
+    : (isSharedRide && selectedRide.supports_shared_rides && selectedRide.shared_fare)
+      ? selectedRide.shared_fare
+      : (selectedRide.calculated_fare ?? Math.round((selectedRide.base_fare + (distanceKm * selectedRide.price_per_km) + (durationMins * selectedRide.price_per_min)) / 50) * 50);
 
   useEffect(() => {
     if (appliedCoupon) {
@@ -196,7 +268,7 @@ export default function BookRideScreen() {
         setDiscountAmount(disc);
       }
     }
-  }, [selectedRide, distanceKm, durationMins, bidAmount, isBidVisible, appliedCoupon, calculateCouponDiscount, computedFareBeforeDiscount]);
+  }, [selectedRide, distanceKm, durationMins, bidAmount, isBidVisible, isSharedRide, appliedCoupon, calculateCouponDiscount, computedFareBeforeDiscount]);
 
   const handleApplyCouponCode = async (codeToValidate?: string) => {
     const rawCode = (codeToValidate || promoInputCode).trim().toUpperCase();
@@ -308,7 +380,7 @@ export default function BookRideScreen() {
           schema: 'public', 
           table: 'rides',
           filter: `id=eq.${currentRideId}` 
-        }, (payload) => {
+        }, (payload: any) => {
           if (payload.new.status === 'accepted') {
             setIsSearching(false);
             clearTimeout(cancelTimeout);
@@ -376,7 +448,10 @@ export default function BookRideScreen() {
 
   useEffect(() => {
     if (distanceKm > 0 && durationMins > 0) {
-      const calculated = (selectedRide.baseFare + (distanceKm * selectedRide.pricePerKm) + (durationMins * selectedRide.pricePerMin)) * surgeMultiplier;
+      const baseFare = selectedRide.base_fare ?? 500;
+      const pricePerKm = selectedRide.price_per_km ?? 150;
+      const pricePerMin = selectedRide.price_per_min ?? 30;
+      const calculated = (baseFare + (distanceKm * pricePerKm) + (durationMins * pricePerMin)) * surgeMultiplier;
       // Round to nearest 50 Naira for clean pricing
       setBidAmount(Math.round(calculated / 50) * 50);
     }
@@ -405,6 +480,18 @@ export default function BookRideScreen() {
   const handleBook = async () => {
     if (!authUser || !currentLocation || !destinationLocation) return;
     
+    // Validate that the ride type is currently available (has at least 1 online approved driver)
+    const isAvail = selectedRide.is_available ?? ((selectedRide.available_drivers_count || 0) > 0);
+    if (scheduleTime === 'Now' && !isAvail) {
+      setAlertConfig({
+        visible: true,
+        title: 'Ride Type Unavailable',
+        message: `There are currently zero online, approved drivers for ${selectedRide.name}. Please select an available ride type to continue.`,
+        type: 'warning'
+      });
+      return;
+    }
+
     setIsBooking(true);
     try {
       // Check for existing active rides
@@ -433,67 +520,51 @@ export default function BookRideScreen() {
         return;
       }
 
-      const rawFare = isBidVisible ? bidAmount : Math.round((selectedRide.baseFare + (distanceKm * selectedRide.pricePerKm) + (durationMins * selectedRide.pricePerMin)) / 50) * 50;
-      const finalFare = Math.max(0, rawFare - discountAmount);
+      // Call authoritative backend RPC for race-condition-safe booking & fare validation
+      const { data: bookedRide, error: rpcError } = await supabase.rpc('book_ride_request', {
+        p_rider_id: authUser.id,
+        p_ride_type_id: selectedRide.id,
+        p_pickup_lat: currentLocation.latitude,
+        p_pickup_lng: currentLocation.longitude,
+        p_pickup_address: currentAddress,
+        p_destination_lat: destinationLocation.latitude,
+        p_destination_lng: destinationLocation.longitude,
+        p_destination_address: destinationAddress,
+        p_distance_km: distanceKm || 0,
+        p_duration_mins: durationMins || 0,
+        p_is_scheduled: scheduleTime !== 'Now',
+        p_scheduled_at: scheduleTime !== 'Now' ? new Date(scheduleTime).toISOString() : null,
+        p_is_shared: isSharedRide && selectedRide.supports_shared_rides,
+        p_passenger_count: passengerCount,
+        p_coupon_id: appliedCoupon ? appliedCoupon.id : null,
+        p_is_bid: isBidVisible && bidAmount > 0,
+        p_bid_amount: isBidVisible && bidAmount > 0 ? bidAmount : null,
+      });
 
-      const { data, error } = await supabase
-        .from('rides')
-        .insert({
-          rider_id: authUser.id,
-          pickup_lat: currentLocation.latitude,
-          pickup_lng: currentLocation.longitude,
-          pickup_address: currentAddress,
-          destination_lat: destinationLocation.latitude,
-          destination_lng: destinationLocation.longitude,
-          destination_address: destinationAddress,
-          ride_type: selectedRide.name,
-          fare: finalFare,
-          distance_km: distanceKm,
-          duration_mins: durationMins,
-          status: scheduleTime !== 'Now' ? 'scheduled' : 'searching',
-          surge_multiplier: surgeMultiplier,
-          is_scheduled: scheduleTime !== 'Now',
-          scheduled_at: scheduleTime !== 'Now' ? new Date(scheduleTime).toISOString() : null,
-        })
-        .select()
-        .single();
-
-      if (error) throw error;
-
-      // If coupon applied, record redemption in user_coupons & update usage count
-      if (appliedCoupon && data?.id) {
-        try {
-          await supabase.from('user_coupons').insert({
-            user_id: authUser.id,
-            coupon_id: appliedCoupon.id,
-            ride_id: data.id,
-            discount_applied: discountAmount,
-          });
-
-          await supabase
-            .from('coupons')
-            .update({ times_used: (appliedCoupon.times_used || 0) + 1 })
-            .eq('id', appliedCoupon.id);
-        } catch (couponRecordErr) {
-          console.warn('Coupon record error:', couponRecordErr);
-        }
+      if (rpcError) {
+        setAlertConfig({
+          visible: true,
+          title: 'Booking Notice',
+          message: rpcError.message || 'Unable to book this ride type. Please choose another option.',
+          type: 'warning'
+        });
+        setIsBooking(false);
+        return;
       }
 
       if (scheduleTime !== 'Now') {
-        // Scheduled ride logic
         setIsScheduleSuccessVisible(true);
       } else {
-        // Immediate ride logic
-        setCurrentRideId(data.id);
+        setCurrentRideId(bookedRide?.id);
         setIsSearching(true);
       }
 
     } catch (err: any) {
-      console.error(err);
+      console.error('Ride booking error:', err);
       setAlertConfig({
         visible: true,
         title: 'Booking Error',
-        message: 'Failed to create ride request. Please try again.',
+        message: err.message || 'Failed to create ride request. Please try again.',
         type: 'error'
       });
     } finally {
@@ -650,50 +721,111 @@ export default function BookRideScreen() {
             )}
           </View>
           
-          <View style={s.rideTypesRow}>
-            {RIDE_TYPES.map((ride) => {
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.rideTypesRow}>
+            {rideTypes.map((ride) => {
               const isSelected = selectedRide.id === ride.id;
-              const calculated = ride.baseFare + (distanceKm * ride.pricePerKm) + (durationMins * ride.pricePerMin);
-              const eta = durationMins ? Math.ceil(durationMins) + ride.etaMins : ride.etaMins;
+              const isAvail = ride.is_available ?? ((ride.available_drivers_count || 0) > 0);
+              const calculated = (isSharedRide && ride.supports_shared_rides && ride.shared_fare) 
+                ? ride.shared_fare 
+                : (ride.calculated_fare ?? Math.round((ride.base_fare + (distanceKm * ride.price_per_km) + (durationMins * ride.price_per_min)) / 50) * 50);
+              const eta = durationMins ? Math.ceil(durationMins) + (ride.estimated_pickup_mins || 5) : (ride.estimated_pickup_mins || 5);
 
               return (
                 <TouchableOpacity
                   key={ride.id}
                   activeOpacity={0.8}
-                  onPress={() => setSelectedRide(ride)}
+                  onPress={() => {
+                    if (!isAvail) {
+                      setAlertConfig({
+                        visible: true,
+                        title: 'Ride Type Unavailable',
+                        message: `There are currently no online, approved drivers for ${ride.name} in your area. Please select an available option.`,
+                        type: 'info'
+                      });
+                      return;
+                    }
+                    setSelectedRide(ride);
+                  }}
                   style={[
                     s.rideCard,
-                    { backgroundColor: C.surface, borderColor: isSelected ? Colors.brand.secondary : C.border }
+                    { 
+                      backgroundColor: C.surface, 
+                      borderColor: isSelected ? Colors.brand.secondary : C.border,
+                      opacity: isAvail ? 1 : 0.55
+                    }
                   ]}
                 >
-                  {isSelected && (
+                  {isSelected && isAvail && (
                     <View style={s.checkBadge}>
                       <Ionicons name="checkmark-circle" size={20} color={Colors.brand.secondary} />
                     </View>
                   )}
-                  <Ionicons name={ride.icon} size={32} color={C.text} style={s.rideIcon} />
+                  <Ionicons name={(ride.icon_name || 'car') as any} size={30} color={isAvail ? C.text : C.textMuted} style={s.rideIcon} />
                   <Text style={[s.rideEta, { color: C.textSecondary }]}>{eta} Min</Text>
+                  
+                  {isAvail ? (
+                    <View style={s.availableBadge}>
+                      <Text style={s.availableBadgeTxt}>{(ride.available_drivers_count || 1)} Available</Text>
+                    </View>
+                  ) : (
+                    <View style={s.unavailableBadge}>
+                      <Text style={s.unavailableBadgeTxt}>No Drivers</Text>
+                    </View>
+                  )}
+
                   <View style={s.rideDivider} />
                   <View style={s.rideInfoRow}>
-                    <Text style={[s.rideName, { color: C.text }]}>
+                    <Text style={[s.rideName, { color: isAvail ? C.text : C.textMuted }]}>
                       {ride.name} {surgeMultiplier > 1 && <Ionicons name="flash" size={14} color={Colors.brand.primary} />}
                     </Text>
                     <View style={{ alignItems: 'flex-end' }}>
-                      <Text style={[s.ridePrice, { color: Colors.brand.secondary }]}>
-                        {distanceKm > 0 ? formatCurrency(calculated) : formatCurrency(ride.baseFare * surgeMultiplier)}
+                      <Text style={[s.ridePrice, { color: isAvail ? Colors.brand.secondary : C.textMuted }]}>
+                        {formatCurrency(calculated)}
                       </Text>
-                      {surgeMultiplier > 1 && (
-                        <Text style={{ fontSize: 10, color: Colors.brand.primary, fontWeight: 'bold' }}>
-                          {surgeMultiplier}x SURGE
-                        </Text>
-                      )}
                     </View>
                   </View>
-                  <Text style={[s.rideSeats, { color: C.textMuted }]}>{ride.seats} Seats Capacity</Text>
+                  <Text style={[s.rideSeats, { color: C.textMuted }]}>{ride.passenger_capacity} Seats</Text>
                 </TouchableOpacity>
               );
             })}
-          </View>
+          </ScrollView>
+
+          {/* Shared Ride Option Toggle */}
+          {selectedRide.supports_shared_rides && (
+            <TouchableOpacity
+              activeOpacity={0.8}
+              onPress={() => setIsSharedRide(!isSharedRide)}
+              style={[
+                s.sharedRideOptionCard,
+                {
+                  backgroundColor: isSharedRide ? (isDark ? '#1E293B' : '#EFF6FF') : C.surface,
+                  borderColor: isSharedRide ? Colors.brand.secondary : C.border,
+                }
+              ]}
+            >
+              <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1, gap: 12 }}>
+                <View style={[s.sharedIconWrap, { backgroundColor: Colors.brand.secondary + '20' }]}>
+                  <Ionicons name="people" size={20} color={Colors.brand.secondary} />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                    <Text style={[s.sharedOptionTitle, { color: C.text }]}>Shared Ride</Text>
+                    <View style={s.sharedDiscountBadge}>
+                      <Text style={s.sharedDiscountBadgeTxt}>SAVE {selectedRide.shared_discount_percentage || 20}%</Text>
+                    </View>
+                  </View>
+                  <Text style={[s.sharedOptionDesc, { color: C.textSecondary }]}>
+                    Share your ride with others heading the same direction and save money.
+                  </Text>
+                </View>
+              </View>
+              <Ionicons 
+                name={isSharedRide ? 'checkbox' : 'square-outline'} 
+                size={24} 
+                color={isSharedRide ? Colors.brand.secondary : C.textMuted} 
+              />
+            </TouchableOpacity>
+          )}
 
           {/* Bidding UI */}
           {isBidVisible && bidAmount > 0 && (
@@ -702,7 +834,7 @@ export default function BookRideScreen() {
               <View style={s.bidControlsRow}>
                 <TouchableOpacity 
                   style={[s.bidCtrlBtn, { backgroundColor: C.surfaceAlt }]}
-                  onPress={() => setBidAmount(prev => Math.max(selectedRide.baseFare, prev - 100))}
+                  onPress={() => setBidAmount(prev => Math.max(selectedRide.base_fare ?? 500, prev - 100))}
                 >
                   <Ionicons name="remove" size={24} color={C.text} />
                 </TouchableOpacity>
@@ -779,7 +911,14 @@ export default function BookRideScreen() {
             ) : (
               <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
                 <Text style={s.bookBtnTxt}>
-                  {isBidVisible ? `Bid ${formatCurrency(Math.max(0, bidAmount - discountAmount))}` : `Book ${selectedRide.name}`}
+                  {isBidVisible 
+                    ? `Bid ${formatCurrency(Math.max(0, bidAmount - discountAmount))}` 
+                    : !(selectedRide.is_available ?? ((selectedRide.available_drivers_count || 0) > 0)) && scheduleTime === 'Now'
+                      ? `No ${selectedRide.name} Drivers Available`
+                      : isSharedRide && selectedRide.supports_shared_rides
+                        ? `Book Shared ${formatCurrency(Math.max(0, computedFareBeforeDiscount - discountAmount))}`
+                        : `Book ${selectedRide.name} ${formatCurrency(Math.max(0, computedFareBeforeDiscount - discountAmount))}`
+                  }
                 </Text>
                 {discountAmount > 0 && (
                   <View style={s.btnDiscountPill}>
@@ -1241,13 +1380,76 @@ const s = StyleSheet.create({
     flexDirection: 'row',
     gap: 12,
     marginBottom: 20,
+    paddingRight: 12,
   },
   rideCard: {
-    flex: 1,
-    borderRadius: 10,
+    minWidth: 125,
+    borderRadius: 12,
     borderWidth: 2,
-    padding: 16,
+    padding: 14,
     position: 'relative',
+    justifyContent: 'space-between',
+  },
+  unavailableBadge: {
+    backgroundColor: '#EF444415',
+    borderRadius: 6,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    marginBottom: 8,
+    alignSelf: 'center',
+  },
+  unavailableBadgeTxt: {
+    color: '#EF4444',
+    fontSize: 10,
+    fontWeight: '700',
+  },
+  availableBadge: {
+    backgroundColor: '#10B98115',
+    borderRadius: 6,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    marginBottom: 8,
+    alignSelf: 'center',
+  },
+  availableBadgeTxt: {
+    color: '#10B981',
+    fontSize: 10,
+    fontWeight: '700',
+  },
+  sharedRideOptionCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    padding: 14,
+    borderRadius: 14,
+    borderWidth: 1.5,
+    marginBottom: 16,
+  },
+  sharedIconWrap: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  sharedOptionTitle: {
+    fontSize: 14,
+    fontWeight: '800',
+  },
+  sharedDiscountBadge: {
+    backgroundColor: '#10B981',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 6,
+  },
+  sharedDiscountBadgeTxt: {
+    color: '#fff',
+    fontSize: 10,
+    fontWeight: '800',
+  },
+  sharedOptionDesc: {
+    fontSize: 12,
+    marginTop: 2,
   },
   checkBadge: {
     position: 'absolute',

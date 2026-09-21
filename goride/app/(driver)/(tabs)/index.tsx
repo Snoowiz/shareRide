@@ -153,14 +153,19 @@ export default function DriverHomeIndex() {
         .eq('status', 'searching')
         .order('created_at', { ascending: false });
 
-      // 2. Fetch rides (only for non-bike drivers)
+      // 2. Fetch rides (only for non-bike drivers, filtered to driver's ride type if set)
       let rides: any[] = [];
       if (!isBikeDriver) {
-        const { data } = await supabase
+        let query = supabase
           .from('rides')
           .select('*')
-          .eq('status', 'searching')
-          .order('created_at', { ascending: false });
+          .eq('status', 'searching');
+
+        if (authUser?.rideTypeId) {
+          query = query.eq('ride_type_id', authUser.rideTypeId);
+        }
+
+        const { data } = await query.order('created_at', { ascending: false });
         rides = data || [];
       }
 
@@ -277,28 +282,55 @@ export default function DriverHomeIndex() {
 
     setLoading(true);
     try {
-      const table = requestType === 'delivery' ? 'deliveries' : 'rides';
-      const updateData: any = {
-        status: 'accepted',
-        driver_id: authUser.id,
-      };
-      if (requestType === 'delivery') {
-        updateData.accepted_at = new Date().toISOString();
-      }
-
-      const { error } = await supabase
-        .from(table)
-        .update(updateData)
-        .eq('id', requestId);
-
-      if (error) throw error;
-
-      setAvailableRides([]);
-      setIsNewRideVisible(false);
-
       if (requestType === 'ride') {
+        const { data: rpcRes, error: rpcErr } = await supabase.rpc('accept_ride_request', {
+          p_ride_id: requestId,
+          p_driver_id: authUser.id,
+        });
+
+        if (rpcErr) throw rpcErr;
+        if (!rpcRes?.success) {
+          setAlertConfig({
+            visible: true,
+            title: 'Ride Unavailable',
+            message: rpcRes?.message || 'This ride is no longer available.',
+            type: 'warning',
+          });
+          setLoading(false);
+          fetchAvailableRequests();
+          return;
+        }
+
+        setAvailableRides([]);
+        setIsNewRideVisible(false);
         router.push(`/(driver)/active-trip?rideId=${requestId}`);
       } else {
+        const { data: updatedDelivery, error: delivErr } = await supabase
+          .from('deliveries')
+          .update({
+            status: 'accepted',
+            driver_id: authUser.id,
+            accepted_at: new Date().toISOString(),
+          })
+          .eq('id', requestId)
+          .eq('status', 'searching')
+          .select();
+
+        if (delivErr) throw delivErr;
+        if (!updatedDelivery || updatedDelivery.length === 0) {
+          setAlertConfig({
+            visible: true,
+            title: 'Delivery Unavailable',
+            message: 'This delivery has already been accepted or cancelled.',
+            type: 'warning',
+          });
+          setLoading(false);
+          fetchAvailableRequests();
+          return;
+        }
+
+        setAvailableRides([]);
+        setIsNewRideVisible(false);
         router.push(`/(driver)/active-delivery?deliveryId=${requestId}`);
       }
 

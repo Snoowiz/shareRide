@@ -26,7 +26,7 @@ class AdminSeeder extends Seeder
             'view_drivers', 'edit_drivers', 'verify_drivers', 'suspend_drivers',
 
             // Rides & Deliveries
-            'view_rides', 'view_deliveries', 'cancel_rides', 'cancel_deliveries',
+            'view_rides', 'view_deliveries', 'cancel_rides', 'cancel_deliveries', 'manage_ride_types',
 
             // Wallets & Finance
             'view_wallets', 'view_transactions', 'manage_withdrawals', 'process_payouts',

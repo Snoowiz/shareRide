@@ -28,7 +28,8 @@ export interface AuthUser {
   bankName?: string;
   accountNumber?: string;
   accountName?: string;
-  driverType?: 'car' | 'motorbike' | 'tricycle';
+  driverType?: string;
+  rideTypeId?: string;
   dateOfBirth?: string;
   gender?: string;
   driversLicenseUrl?: string;
@@ -51,7 +52,8 @@ export interface AuthUser {
 }
 
 export interface DriverSignupData {
-  driverType: 'car' | 'motorbike' | 'tricycle' | null;
+  driverType: string | null;
+  rideTypeId?: string | null;
   firstName: string;
   lastName: string;
   dateOfBirth: string;
@@ -83,6 +85,7 @@ export interface DriverSignupData {
 
 export const emptyDriverSignup: DriverSignupData = {
   driverType: null,
+  rideTypeId: null,
   firstName: '',
   lastName: '',
   dateOfBirth: '',
@@ -188,6 +191,7 @@ async function fetchProfile(userId: string): Promise<AuthUser | null> {
     
     // Driver fields
     driverType: dp?.driver_type ?? undefined,
+    rideTypeId: dp?.ride_type_id ?? undefined,
     bankName: dp?.bank_name ?? '',
     accountNumber: dp?.account_number ?? '',
     accountName: dp?.account_name ?? '',
@@ -664,6 +668,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         .from('driver_profiles')
         .upsert({
           id: userId,
+          ride_type_id: data.rideTypeId || null,
           driver_type: data.driverType || data.vehicleType.toLowerCase(),
           drivers_license_url: data.driversLicenseUri,
           profile_photo_url: data.profilePhotoUri,

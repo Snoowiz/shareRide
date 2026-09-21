@@ -33,6 +33,8 @@ export default function DriverEditProfileScreen() {
   const [avatarUrl, setAvatarUrl] = useState(authUser?.avatar || '');
   
   const [driverType, setDriverType] = useState(authUser?.driverType || 'car');
+  const [rideTypeId, setRideTypeId] = useState(authUser?.rideTypeId || '');
+  const [backendRideTypes, setBackendRideTypes] = useState<any[]>([]);
   const [dob, setDob] = useState(authUser?.dateOfBirth || '');
   const [gender, setGender] = useState(authUser?.gender || '');
   const [address, setAddress] = useState(authUser?.residentialAddress || '');
@@ -62,6 +64,25 @@ export default function DriverEditProfileScreen() {
     message: '',
     type: 'info',
   });
+
+  useEffect(() => {
+    const fetchRideTypes = async () => {
+      try {
+        const { data: rtData, error } = await supabase
+          .from('ride_types')
+          .select('*')
+          .eq('is_active', true)
+          .order('display_order', { ascending: true });
+
+        if (!error && rtData) {
+          setBackendRideTypes(rtData);
+        }
+      } catch (e) {
+        console.warn('Error fetching ride types in edit-profile:', e);
+      }
+    };
+    fetchRideTypes();
+  }, []);
 
   const GOOGLE_MAPS_APIKEY = Constants.expoConfig?.extra?.EXPO_PUBLIC_GOOGLE_MAPS_APIKEY || process.env.EXPO_PUBLIC_GOOGLE_MAPS_APIKEY;
 
@@ -97,6 +118,7 @@ export default function DriverEditProfileScreen() {
         .from('driver_profiles')
         .update({
           driver_type: driverType,
+          ride_type_id: rideTypeId || null,
           date_of_birth: dob || null,
           gender: gender.toLowerCase(),
           residential_address: address.trim(),
@@ -316,23 +338,33 @@ export default function DriverEditProfileScreen() {
             <View style={[s.divider, { backgroundColor: C.border, marginVertical: 12 }]} />
 
             <View style={s.inputGroup}>
-              <Text style={[s.label, { color: C.textSecondary }]}>Driver Type</Text>
-              <View style={s.typeToggle}>
-                <TouchableOpacity 
-                  style={[s.typeBtn, driverType === 'car' && { backgroundColor: accentColor, borderColor: accentColor }]}
-                  onPress={() => setDriverType('car')}
-                >
-                  <Ionicons name="car-outline" size={20} color={driverType === 'car' ? '#000' : C.textMuted} />
-                  <Text style={[s.typeBtnTxt, { color: driverType === 'car' ? '#000' : C.textMuted }]}>Car Driver</Text>
-                </TouchableOpacity>
-                <TouchableOpacity 
-                  style={[s.typeBtn, driverType === 'motorbike' && { backgroundColor: accentColor, borderColor: accentColor }]}
-                  onPress={() => setDriverType('motorbike')}
-                >
-                  <Ionicons name="bicycle-outline" size={20} color={driverType === 'motorbike' ? '#000' : C.textMuted} />
-                  <Text style={[s.typeBtnTxt, { color: driverType === 'motorbike' ? '#000' : C.textMuted }]}>Bike Courier</Text>
-                </TouchableOpacity>
-              </View>
+              <Text style={[s.label, { color: C.textSecondary }]}>Vehicle Ride Type</Text>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, paddingVertical: 4 }}>
+                {backendRideTypes.map((rt) => {
+                  const isSelected = rideTypeId === rt.id || driverType === rt.code;
+                  return (
+                    <TouchableOpacity
+                      key={rt.id || rt.code}
+                      style={[
+                        s.typeBtn,
+                        { paddingHorizontal: 16, height: 48, borderRadius: 12, borderWidth: 1.5 },
+                        isSelected 
+                          ? { backgroundColor: accentColor, borderColor: accentColor } 
+                          : { backgroundColor: C.surface, borderColor: C.border }
+                      ]}
+                      onPress={() => {
+                        setDriverType(rt.code);
+                        setRideTypeId(rt.id);
+                      }}
+                    >
+                      <Ionicons name={(rt.icon_name || 'car') as any} size={18} color={isSelected ? '#000' : C.textMuted} />
+                      <Text style={[s.typeBtnTxt, { color: isSelected ? '#000' : C.text, fontWeight: isSelected ? '700' : '500' }]}>
+                        {rt.name} ({rt.passenger_capacity} Seats)
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </ScrollView>
             </View>
 
             <View style={s.row}>

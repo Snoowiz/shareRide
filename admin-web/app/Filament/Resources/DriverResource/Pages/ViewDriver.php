@@ -30,7 +30,12 @@ class ViewDriver extends ViewRecord
                 Section::make('Driver Details')
                     ->columns(3)
                     ->schema([
-                        TextEntry::make('driverProfile.driver_type')->label('Vehicle Type')->badge(),
+                        TextEntry::make('driverProfile.rideType.name')
+                            ->label('Assigned Ride Type')
+                            ->badge()
+                            ->color('primary')
+                            ->default(fn ($record) => ucfirst($record->driverProfile?->driver_type ?? 'Unassigned')),
+                        TextEntry::make('driverProfile.driver_type')->label('Category')->badge(),
                         TextEntry::make('driverProfile.vehicle_make')->label('Vehicle Make'),
                         TextEntry::make('driverProfile.vehicle_year')->label('Year'),
                         TextEntry::make('driverProfile.vehicle_color')->label('Color'),

@@ -12,7 +12,7 @@ class DriverProfile extends Model
     public $incrementing = false;
 
     protected $fillable = [
-        'id', 'driver_type', 'date_of_birth', 'gender',
+        'id', 'ride_type_id', 'driver_type', 'date_of_birth', 'gender',
         'drivers_license_url', 'profile_photo_url', 'nin_slip_url',
         'vehicle_year', 'vehicle_make', 'license_plate', 'vehicle_color',
         'vehicle_particulars_url', 'vehicle_exterior_url', 'billing_type',
@@ -29,5 +29,10 @@ class DriverProfile extends Model
     public function profile()
     {
         return $this->belongsTo(Profile::class, 'id', 'id');
+    }
+
+    public function rideType()
+    {
+        return $this->belongsTo(RideType::class, 'ride_type_id', 'id');
     }
 }
